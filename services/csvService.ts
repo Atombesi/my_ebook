@@ -1,9 +1,11 @@
-import { Book, AppData, IndexMetadata, AppSettings, BookNotes, BookNoteEntry, BookStatus } from '../types';
+import { Book, AppData, IndexMetadata, AppSettings, BookNotes, BookNoteEntry, BookStatus, LoanRecord } from '../types';
 import { 
   DEFAULT_CSV_CONTENT, 
   STORAGE_KEY_INDEX, 
   STORAGE_KEY_NOTE, 
   STORAGE_KEY_CONFIG, 
+  STORAGE_KEY_LAST_BACKUP,
+  STORAGE_KEY_LOAN_HISTORY,
   CSV_SEPARATOR,
   DEFAULT_DROPBOX_FOLDER_URL
 } from '../constants';
@@ -30,9 +32,16 @@ export const saveRawIndex = (content: string): void => {
 // --- SETTINGS MANAGEMENT ---
 export const loadSettings = (): AppSettings => {
   const rawConfig = localStorage.getItem(STORAGE_KEY_CONFIG);
+  
+  // Default VUOTO per usare il proxy pubblico di fallback (AllOrigins)
+  // Il proxy precedente era bloccato da Cloudflare Access
+  const DEFAULT_PROXY = ''; 
+
   let settings: AppSettings = {
     folderUrl: DEFAULT_DROPBOX_FOLDER_URL,
-    uiOpacity: 0.3,
+    lastUpdateUrl: '', // Default empty
+    customProxyUrl: DEFAULT_PROXY, 
+    uiOpacity: 0.6, 
     debugMode: false
   };
 
@@ -41,7 +50,9 @@ export const loadSettings = (): AppSettings => {
         const parsed = JSON.parse(rawConfig);
         settings = {
             folderUrl: parsed.folderUrl !== undefined ? parsed.folderUrl : DEFAULT_DROPBOX_FOLDER_URL,
-            uiOpacity: parsed.uiOpacity !== undefined ? parsed.uiOpacity : 0.3,
+            lastUpdateUrl: parsed.lastUpdateUrl || '',
+            customProxyUrl: parsed.customProxyUrl !== undefined ? parsed.customProxyUrl : DEFAULT_PROXY,
+            uiOpacity: parsed.uiOpacity !== undefined ? parsed.uiOpacity : 0.6,
             debugMode: parsed.debugMode !== undefined ? parsed.debugMode : false
         };
     } catch (e) {
@@ -57,9 +68,16 @@ export const saveSettings = (settings: AppSettings): void => {
 
 // --- NOTES / STATUS MANAGEMENT ---
 
-// Helper per generare la chiave univoca
 export const getBookKey = (book: Book): string => {
-    return `${book.author}|${book.title}`;
+    const nAuthor = book.author ? book.author.trim().toUpperCase() : "UNKNOWN";
+    const nTitle = book.title ? book.title.trim().toUpperCase() : "UNKNOWN";
+    return `${nAuthor}|${nTitle}`;
+};
+
+export const getRawKey = (author: string, title: string): string => {
+    const nAuthor = author ? author.trim().toUpperCase() : "UNKNOWN";
+    const nTitle = title ? title.trim().toUpperCase() : "UNKNOWN";
+    return `${nAuthor}|${nTitle}`;
 };
 
 export const loadNotes = (): BookNotes => {
@@ -69,14 +87,11 @@ export const loadNotes = (): BookNotes => {
         const parsed = JSON.parse(raw);
         const normalized: BookNotes = {};
         
-        // Data Migration: String -> Object
         Object.keys(parsed).forEach(key => {
             const val = parsed[key];
             if (typeof val === 'string') {
-                // Vecchio formato: solo stato
                 normalized[key] = { status: val as BookStatus };
             } else {
-                // Nuovo formato: oggetto completo
                 normalized[key] = val;
             }
         });
@@ -90,6 +105,91 @@ export const loadNotes = (): BookNotes => {
 
 export const saveNotes = (notes: BookNotes): void => {
     localStorage.setItem(STORAGE_KEY_NOTE, JSON.stringify(notes));
+};
+
+// --- LOAN HISTORY MANAGEMENT ---
+
+export const loadLoanHistory = (): LoanRecord[] => {
+    const raw = localStorage.getItem(STORAGE_KEY_LOAN_HISTORY);
+    if (!raw) return [];
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return [];
+    }
+};
+
+export const saveLoanHistory = (history: LoanRecord[]): void => {
+    localStorage.setItem(STORAGE_KEY_LOAN_HISTORY, JSON.stringify(history));
+};
+
+// --- BACKUP MANAGEMENT ---
+
+export interface BackupInfo {
+    date: string;
+    filename: string;
+    timestamp?: number; 
+}
+
+export const getLastBackupInfo = (): BackupInfo | null => {
+    const raw = localStorage.getItem(STORAGE_KEY_LAST_BACKUP);
+    if (!raw) return null;
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+export const saveLastBackupInfo = (filename: string): void => {
+    const now = new Date();
+    const info: BackupInfo = {
+        date: now.toLocaleString(),
+        filename: filename,
+        timestamp: now.getTime()
+    };
+    localStorage.setItem(STORAGE_KEY_LAST_BACKUP, JSON.stringify(info));
+};
+
+export const exportBackupData = (): string => {
+    const notes = loadNotes();
+    const settings = loadSettings();
+    const loanHistory = loadLoanHistory();
+    
+    const backupObject = {
+        version: 1,
+        date: new Date().toISOString(),
+        notes: notes,
+        settings: settings,
+        loanHistory: loanHistory
+    };
+    
+    return JSON.stringify(backupObject, null, 2);
+};
+
+export const importBackupData = (jsonString: string): boolean => {
+    try {
+        const backupObject = JSON.parse(jsonString);
+        
+        if (!backupObject.notes) {
+            throw new Error("Formato backup non valido: mancano le note.");
+        }
+
+        saveNotes(backupObject.notes);
+
+        if (backupObject.settings) {
+            saveSettings(backupObject.settings);
+        }
+
+        if (backupObject.loanHistory) {
+            saveLoanHistory(backupObject.loanHistory);
+        }
+
+        return true;
+    } catch (e) {
+        console.error("Backup restore failed", e);
+        return false;
+    }
 };
 
 // --- DATA LOADING ---
@@ -118,29 +218,37 @@ export const loadData = (): AppData => {
     }
   }
 
-  const books: Book[] = [];
+  const booksMap = new Map<string, Book>();
 
   for (let i = startIndex; i < lines.length; i++) {
     const line = lines[i];
     const parts = line.split(CSV_SEPARATOR);
     
-    // FORMATO ATTESO: Autore;Titolo;Formato
     if (parts.length >= 3) {
       const author = parts[0].trim();
       const title = parts[1].trim();
       const format = parts[2].trim();
 
-      // VALIDAZIONE: Scarta se autore o titolo sono vuoti
       if (author && title) {
-          books.push({
-            id: generateId(),
-            author: author,
-            title: title,
-            format: format
-          });
+          const key = getRawKey(author, title);
+          if (!booksMap.has(key)) {
+              booksMap.set(key, {
+                id: generateId(),
+                author: author,
+                title: title,
+                format: format
+              });
+          } else {
+              const existingBook = booksMap.get(key)!;
+              if (format && !existingBook.format.includes(format)) {
+                  existingBook.format += `, ${format}`;
+              }
+          }
       }
     }
   }
+
+  const books = Array.from(booksMap.values());
 
   return { metadata, books };
 };

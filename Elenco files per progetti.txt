@@ -1,0 +1,30 @@
+File progetto ebook caricati
+
+CsvServices
+Syncservices
+types.ts
+
+
+file MYEBOOK_2.txt
+capacitor.config.ts
+constants.ts
+declarations.d.ts
+
+MYEBOOK_3.txt
+vite.config.ts
+components/AddBookModal.tsx
+components/AuthorComboBlock.tsx
+components/AuthorFilterModal.tsx
+components/BookListBlock.tsx
+components/DetailBlock.tsx
+
+MYEBOOK_4.txt
+Components/Headers.ts
+components/InfoModal.tsx
+components/NoteModal.tsx
+components/SearchBlock.tsx
+components/SettingsModal.tsx
+components/StatusModal.tsx
+
+MYEBOOK_5.txt
+app.tsx

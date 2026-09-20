@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import { saveRawIndex, loadSettings } from './csvService';
-import { FILE_NAME_DATA, FILE_NAME_INDEX, STORAGE_KEY_LOGS } from '../constants';
+import { STORAGE_KEY_LOGS } from '../constants';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 
 // --- SYSTEM LOGGING ---
 let storedLogs: string[] = [];
@@ -22,7 +23,7 @@ export const addLog = (msg: string) => {
   console.log(logEntry);
   
   debugLogs.unshift(logEntry);
-  if (debugLogs.length > 100) debugLogs = debugLogs.slice(0, 100); // Aumentato limite buffer
+  if (debugLogs.length > 100) debugLogs = debugLogs.slice(0, 100); 
   
   try {
       localStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(debugLogs));
@@ -39,66 +40,117 @@ export const clearLogs = () => {
 
 export const getLogs = () => debugLogs;
 
-// Helper date
 const parseCustomDate = (dateStr: string): Date | null => {
   try {
     if (!dateStr) return null;
-    
-    // NORMALIZZAZIONE: Sostituisce eventuali slash con trattini e pulisce spazi
-    // Esempio: "12/12/2025 10:00" -> "12-12-2025 10:00"
     const normalized = dateStr.replace(/\//g, '-').trim();
-    
     const [d, t] = normalized.split(' ');
     if (!d || !t) return null;
-
     const [day, month, year] = d.split('-').map(Number);
     const [hour, minute] = t.split(':').map(Number);
-    
-    // Controllo validità numerica
-    if (isNaN(day) || isNaN(month) || isNaN(year) || isNaN(hour) || isNaN(minute)) {
-        return null;
-    }
-
+    if (isNaN(day) || isNaN(month) || isNaN(year) || isNaN(hour) || isNaN(minute)) return null;
     return new Date(year, month - 1, day, hour, minute);
   } catch (e) {
     return null;
   }
 };
 
-export interface SyncResult {
-  hasUpdate: boolean;
-  remoteDateStr?: string;
-  error?: string;
-  pendingContent?: string;
-}
+// --- ROBUST HYBRID FETCH STRATEGY ---
 
-// Proxy fetcher
-async function fetchBlobViaProxy(
+async function fetchViaProxy(
     targetUrl: string, 
-    proxyService: 'corsproxy' | 'allorigins',
+    customProxyUrl?: string,
     onStatusUpdate?: (status: string) => void
-): Promise<Blob> {
+): Promise<Response> {
     
+    if (!navigator.onLine) {
+        throw new Error("Nessuna connessione internet disponibile");
+    }
+
+    // 1. Normalizza URL Dropbox (Forza dl=1)
     let downloadUrl = targetUrl;
-    
-    if (downloadUrl.includes('dl=0')) {
-        downloadUrl = downloadUrl.replace('dl=0', 'dl=1');
-    } else if (!downloadUrl.includes('dl=1')) {
-         const separator = downloadUrl.includes('?') ? '&' : '?';
-         downloadUrl = `${downloadUrl}${separator}dl=1`;
+    if (downloadUrl.includes('dropbox.com')) {
+        if (downloadUrl.includes('dl=0')) {
+            downloadUrl = downloadUrl.replace('dl=0', 'dl=1');
+        } else if (!downloadUrl.includes('dl=1')) {
+            const separator = downloadUrl.includes('?') ? '&' : '?';
+            downloadUrl = `${downloadUrl}${separator}dl=1`;
+        }
     }
 
     const uniqueUrl = `${downloadUrl}&ts=${Date.now()}`;
-    let finalUrl = '';
-    
-    if (proxyService === 'corsproxy') {
-        finalUrl = "https://corsproxy.io/?" + encodeURIComponent(uniqueUrl);
-    } else {
-        finalUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(uniqueUrl)}`;
+
+    // --- TENTATIVO 1: CAPACITOR NATIVE HTTP (ANDROID/IOS) ---
+    // Usiamo il plugin nativo SOLO se siamo su un dispositivo.
+    // Usiamo controlli molto difensivi per evitare che errori qui blocchino l'app.
+    let isNative = false;
+    try {
+        isNative = Capacitor.isNativePlatform();
+    } catch (e) {
+        console.warn("Capacitor check failed", e);
+        isNative = false;
     }
 
-    if (onStatusUpdate) onStatusUpdate(`Connessione (${proxyService})...`);
+    if (isNative) {
+        try {
+            if (onStatusUpdate) onStatusUpdate("Richiesta Nativa...");
+            addLog(`[NATIVE] Tentativo GET: ${uniqueUrl}`);
+            
+            // Verifica difensiva: CapacitorHttp esiste?
+            if (CapacitorHttp && typeof CapacitorHttp.get === 'function') {
+                const response = await CapacitorHttp.get({
+                    url: uniqueUrl,
+                    responseType: 'blob' // Importante per file binari/zip
+                });
+
+                if (response.status >= 200 && response.status < 300) {
+                    addLog(`[NATIVE] Successo (${response.status})`);
+                    
+                    // CapacitorHttp 'blob' ritorna i dati in base64 dentro 'data' su Android
+                    const base64Data = response.data;
+                    
+                    // Conversione Base64 -> Blob
+                    const byteCharacters = atob(base64Data);
+                    const byteNumbers = new Array(byteCharacters.length);
+                    for (let i = 0; i < byteCharacters.length; i++) {
+                        byteNumbers[i] = byteCharacters.charCodeAt(i);
+                    }
+                    const byteArray = new Uint8Array(byteNumbers);
+                    const blob = new Blob([byteArray]);
+
+                    return new Response(blob, {
+                        status: response.status,
+                        statusText: "OK"
+                    });
+
+                } else {
+                    // Se fallisce (es. 404), lanciamo errore per provare il fallback web
+                    throw new Error(`Native HTTP Error ${response.status}`);
+                }
+            } else {
+                addLog("[WARN] Plugin CapacitorHttp non trovato o non caricato. Skip.");
+            }
+        } catch (nativeErr: any) {
+            addLog(`[WARN] Native fetch fallita: ${nativeErr.message}. Fallback a Web.`);
+            // Il codice continua qui sotto al blocco Web
+        }
+    }
+
+    // --- TENTATIVO 2: WEB STANDARD (FALLBACK / BROWSER) ---
+    let finalUrl = uniqueUrl;
     
+    // Se abbiamo un proxy configurato o dobbiamo usare quello pubblico
+    if (customProxyUrl && customProxyUrl.trim() !== '') {
+        const separator = customProxyUrl.includes('?') ? '&' : '?';
+        finalUrl = `${customProxyUrl}${separator}url=${encodeURIComponent(uniqueUrl)}`;
+    } else if (!isNative) {
+        // Se siamo su Browser e fallisce il diretto, usiamo proxy pubblico come ultima spiaggia
+        finalUrl = `https://corsproxy.io/?url=${encodeURIComponent(uniqueUrl)}`;
+    }
+
+    if (onStatusUpdate) onStatusUpdate(`Connessione Web...`);
+    addLog(`[WEB] Fetching: ${finalUrl}`);
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000); 
 
@@ -108,124 +160,240 @@ async function fetchBlobViaProxy(
             signal: controller.signal
         });
         clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            throw new Error(`HTTP Error ${response.status}`);
-        }
-        
-        if (onStatusUpdate) onStatusUpdate("Ricezione pacchetto dati...");
-        const blob = await response.blob();
-        
-        if (blob.size < 100) throw new Error("File scaricato troppo piccolo o non valido.");
-        
-        return blob;
+        return response;
     } catch (e: any) {
         clearTimeout(timeoutId);
         throw e;
     }
 }
 
-export const checkForUpdatesAndDownload = async (
+// Strumento di test
+export const testProxyConnection = async (proxyUrl: string): Promise<{ success: boolean; msg: string }> => {
+    try {
+        const testTarget = "https://www.google.com";
+        await fetchViaProxy(testTarget, proxyUrl);
+        return { success: true, msg: "Connessione OK" };
+    } catch (e: any) {
+        return { success: false, msg: `Errore: ${e.message}` };
+    }
+};
+
+export interface CheckResult {
+    hasUpdate: boolean;
+    remoteDateStr?: string;
+    error?: string;
+    updateSource: 'TXT' | 'ZIP';
+    zipBlob?: Blob; 
+    txtContent?: string;
+}
+
+export const checkAppVersion = async (
+    currentVersion: string,
+    zipBlob?: Blob
+): Promise<{ hasUpdate: boolean; remoteVersionStr?: string; error?: string }> => {
+    try {
+        const settings = loadSettings();
+        
+        let remoteVersion = '';
+
+        if (zipBlob) {
+            const zip = await JSZip.loadAsync(zipBlob);
+            const appVersionFileKey = Object.keys(zip.files).find(name => name.endsWith("AppVersion.txt") && !name.includes("__MACOSX"));
+            if (appVersionFileKey) {
+                const content = await zip.file(appVersionFileKey)?.async("string");
+                if (content) {
+                    remoteVersion = content.trim();
+                }
+            }
+        }
+
+        if (!remoteVersion) {
+            let appVersionUrl = '';
+            if (settings.lastUpdateUrl && settings.lastUpdateUrl.includes('Last_Update.txt')) {
+                 appVersionUrl = settings.lastUpdateUrl.replace('Last_Update.txt', 'AppVersion.txt');
+            } else if (settings.folderUrl && !settings.folderUrl.toLowerCase().includes('dropbox.com')) {
+                 const base = settings.folderUrl.endsWith('/') ? settings.folderUrl : settings.folderUrl + '/';
+                 appVersionUrl = base + 'AppVersion.txt';
+            } else if (settings.lastUpdateUrl) {
+                 const parts = settings.lastUpdateUrl.split('/');
+                 parts.pop();
+                 appVersionUrl = parts.join('/') + '/AppVersion.txt?dl=1';
+            }
+            
+            if (appVersionUrl) {
+                try {
+                    const response = await fetchViaProxy(appVersionUrl, settings.customProxyUrl);
+                    if (response.ok) {
+                        remoteVersion = (await response.text()).trim();
+                    }
+                } catch(e) {
+                    // Ignore and fallback to full zip
+                }
+            }
+        }
+
+        // Se ancora non l'abbiamo trovato e siamo su un sistema in cui i link diretti falliscono (es. Dropbox)
+        // Scarichiamo lo ZIP come facciamo per il full check dell'indice.
+        if (!remoteVersion && settings.folderUrl && !zipBlob) {
+            try {
+                const response = await fetchViaProxy(settings.folderUrl, settings.customProxyUrl);
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const zip = await JSZip.loadAsync(blob);
+                    const appVersionFileKey = Object.keys(zip.files).find(name => name.endsWith("AppVersion.txt") && !name.includes("__MACOSX"));
+                    if (appVersionFileKey) {
+                        const content = await zip.file(appVersionFileKey)?.async("string");
+                        if (content) {
+                            remoteVersion = content.trim();
+                        }
+                    }
+                }
+            } catch (e) {
+                addLog(`[WARN] AppVersion ZIP check fallito: ${e}`);
+            }
+        }
+
+        if (remoteVersion) {
+            const extractVersion = (v: string) => {
+                // Prende solo la prima riga utile per evitare di leggere numeri nelle note
+                const firstLine = v.split('\n').find(line => line.trim().length > 0) || '';
+                const match = firstLine.match(/(\d+(\.\d+)*)/);
+                return match ? match[0] : '';
+            };
+
+            const cClean = extractVersion(currentVersion); 
+            const rClean = extractVersion(remoteVersion);
+
+            if (rClean && rClean !== cClean) {
+                const cvParts = cClean.split('.').map(Number);
+                const rvParts = rClean.split('.').map(Number);
+                
+                let isNewer = false;
+                for (let i = 0; i < Math.max(cvParts.length, rvParts.length); i++) {
+                    const c = cvParts[i] || 0;
+                    const r = rvParts[i] || 0;
+                    if (r > c) {
+                        isNewer = true;
+                        break;
+                    } else if (r < c) {
+                        isNewer = false;
+                        break;
+                    }
+                }
+                
+                if (isNewer) {
+                    return { hasUpdate: true, remoteVersionStr: rClean };
+                }
+            }
+            return { hasUpdate: false };
+        }
+        return { hasUpdate: false, error: 'Could not fetch AppVersion' };
+    } catch (e: any) {
+        return { hasUpdate: false, error: e.message };
+    }
+};
+
+// CHECK VERSION LOGIC
+export const checkVersion = async (
     currentDateStr: string,
     onStatusUpdate?: (status: string) => void
-): Promise<SyncResult> => {
+): Promise<CheckResult> => {
     
     const settings = loadSettings();
-    const isDebug = settings.debugMode || false;
+    if (!settings.folderUrl) return { hasUpdate: false, error: 'MISSING_URL', updateSource: 'ZIP' };
 
-    if (!settings.folderUrl) {
-        return { hasUpdate: false, error: 'MISSING_URL' };
+    // METODO 1: CONTROLLO LEGGERO (Last_Update.txt)
+    if (settings.lastUpdateUrl && settings.lastUpdateUrl.trim() !== '') {
+        try {
+            if (onStatusUpdate) onStatusUpdate("Check File Versione...");
+            // Nota: Anche qui userà fetchViaProxy che tenterà il metodo Nativo
+            const response = await fetchViaProxy(settings.lastUpdateUrl, settings.customProxyUrl, onStatusUpdate);
+            
+            if (response.ok) {
+                const text = await response.text();
+                addLog(`[DEBUG] Last_Update: ${text.substring(0,20)}...`);
+                
+                const parts = text.split(';');
+                if (parts.length >= 2) {
+                    const remoteDateStr = parts[1].trim();
+                    const remoteDate = parseCustomDate(remoteDateStr);
+                    const currentDate = parseCustomDate(currentDateStr);
+                    
+                    if (remoteDate && currentDate && remoteDate > currentDate) {
+                        return { hasUpdate: true, remoteDateStr, updateSource: 'TXT', txtContent: text };
+                    } else if (remoteDate) {
+                        return { hasUpdate: false, remoteDateStr, updateSource: 'TXT' };
+                    }
+                }
+            }
+        } catch (e) {
+            addLog(`[WARN] Check Light fallito: ${e}`);
+        }
     }
 
-    if (isDebug) addLog(`[DEBUG] Start Update. Local Date String: "${currentDateStr}"`);
-    if (onStatusUpdate) onStatusUpdate("Inizializzazione...");
-
+    // METODO 2: CONTROLLO COMPLETO (Fallback: Scarica ZIP e controlla header)
     try {
-        // DOWNLOAD
-        let blob: Blob;
-        try {
-            blob = await fetchBlobViaProxy(settings.folderUrl, 'corsproxy', onStatusUpdate);
-        } catch (e) {
-            if (isDebug) addLog(`[DEBUG] Proxy 1 fallito: ${e}`);
-            if (onStatusUpdate) onStatusUpdate("Primo server occupato. Riprovo...");
-            await new Promise(r => setTimeout(r, 1000));
-            blob = await fetchBlobViaProxy(settings.folderUrl, 'allorigins', onStatusUpdate);
-        }
+        if (onStatusUpdate) onStatusUpdate("Check Indice Full...");
+        const response = await fetchViaProxy(settings.folderUrl, settings.customProxyUrl, onStatusUpdate);
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const blob = await response.blob();
+        if (blob.size < 100) throw new Error("File troppo piccolo");
 
-        if (isDebug) addLog(`[DEBUG] Blob ricevuto. Size: ${blob.size} bytes. Type: ${blob.type}`);
-        
-        if (onStatusUpdate) onStatusUpdate("Apertura archivio ZIP...");
+        // Leggi ZIP
+        if (onStatusUpdate) onStatusUpdate("Lettura ZIP...");
         const zip = await JSZip.loadAsync(blob);
-        
-        // CERCA FILE
         const fileDataKey = Object.keys(zip.files).find(name => name.includes("Ebook_Index") || name.endsWith(".csv"));
         
-        if (!fileDataKey) {
-            if (isDebug) addLog(`[DEBUG] ZIP content keys: ${Object.keys(zip.files).join(", ")}`);
-            throw new Error(`File 'Ebook_Index' non trovato nello ZIP.`);
-        }
-
-        // LOG DATE ZIP
-        if (isDebug) {
-            const zipDate = zip.files[fileDataKey].date;
-            addLog(`[DEBUG] ZIP Entry Date: ${zipDate}`);
-        }
-
-        if (onStatusUpdate) onStatusUpdate("Analisi contenuto...");
-        const content = await zip.file(fileDataKey)?.async("string");
-        if (!content) throw new Error("Impossibile leggere il contenuto del file.");
-
-        // ANALISI HEADER
-        const lines = content.split('\n');
-        const firstLine = lines[0];
+        if (!fileDataKey) throw new Error("File indice non trovato nello ZIP");
         
-        if (isDebug) addLog(`[DEBUG] Header Letto (Raw): "${firstLine}"`);
+        const content = await zip.file(fileDataKey)?.async("string");
+        if (!content) throw new Error("ZIP illeggibile");
 
+        const firstLine = content.split('\n')[0];
         const parts = firstLine.split(';');
-        if (parts.length < 2) {
-            throw new Error("Formato file indice non valido (manca header data).");
-        }
+        if (parts.length < 2) throw new Error("Header non valido");
 
         const remoteDateStr = parts[1].trim();
         const remoteDate = parseCustomDate(remoteDateStr);
         const currentDate = parseCustomDate(currentDateStr);
 
-        if (!remoteDate) throw new Error(`Data remota non valida: "${remoteDateStr}"`);
-
-        if (isDebug) {
-             // Mostriamo come sono state interpretate le date
-             const localParsed = currentDate ? currentDate.toLocaleString() : "FAIL/NULL";
-             const remoteParsed = remoteDate.toLocaleString();
-             addLog(`[DEBUG] Interpreted: Local[${localParsed}] vs Remote[${remoteParsed}]`);
-             
-             if (currentDate) {
-                addLog(`[DEBUG] Check Math: ${remoteDate.getTime()} > ${currentDate.getTime()} ? ${remoteDate > currentDate}`);
-             } else {
-                 addLog(`[DEBUG] Check: Local date is null/invalid, forcing update.`);
-             }
-        }
-
-        // LOGICA CONFRONTO
-        // Se currentDate è null (es. prima installazione o errore parsing precedente), aggiorniamo.
-        if (!currentDate || remoteDate > currentDate) {
-            if (isDebug) addLog("[DEBUG] Update Trovato! Procedo.");
-            if (onStatusUpdate) onStatusUpdate("Aggiornamento valido trovato.");
-            return {
-                hasUpdate: true,
-                remoteDateStr: remoteDateStr,
-                pendingContent: content
-            };
+        if (remoteDate && currentDate && remoteDate > currentDate) {
+             return { hasUpdate: true, remoteDateStr, updateSource: 'ZIP', zipBlob: blob };
         } else {
-            if (isDebug) addLog("[DEBUG] Update NON necessario (Indice già aggiornato).");
-            if (onStatusUpdate) onStatusUpdate("Indice già aggiornato.");
-            return { hasUpdate: false };
+             return { hasUpdate: false, remoteDateStr, updateSource: 'ZIP', zipBlob: blob };
         }
 
-    } catch (error: any) {
-        console.error("[Sync Error]", error);
-        addLog(`Errore Critical: ${error.message}`);
-        return { hasUpdate: false, error: error.message };
+    } catch (e: any) {
+        return { hasUpdate: false, error: e.message, updateSource: 'ZIP' };
     }
+};
+
+// DOWNLOAD LOGIC
+export const performDownload = async (
+    cachedBlob?: Blob,
+    onStatusUpdate?: (status: string) => void
+): Promise<string> => {
+    
+    const settings = loadSettings();
+    let blob = cachedBlob;
+
+    if (!blob) {
+        if (onStatusUpdate) onStatusUpdate("Download ZIP...");
+        const response = await fetchViaProxy(settings.folderUrl, settings.customProxyUrl, onStatusUpdate);
+        if (!response.ok) throw new Error("Download fallito");
+        blob = await response.blob();
+    }
+
+    if (onStatusUpdate) onStatusUpdate("Estrazione...");
+    const zip = await JSZip.loadAsync(blob);
+    const fileDataKey = Object.keys(zip.files).find(name => name.includes("Ebook_Index") || name.endsWith(".csv"));
+    
+    if (!fileDataKey) throw new Error("Indice non trovato");
+    
+    const content = await zip.file(fileDataKey)?.async("string");
+    return content || "";
 };
 
 export const applyUpdate = (content: string) => {
@@ -233,9 +401,13 @@ export const applyUpdate = (content: string) => {
         saveRawIndex(content);
         const lines = content.split('\n');
         const dateStr = lines[0].split(';')[1] || '???';
-        addLog(`Aggiornamento completato. Nuova versione salvata: ${dateStr}`);
+        addLog(`Aggiornamento applicato: ${dateStr}`);
     } catch (e: any) {
-        addLog(`Errore durante il salvataggio dati: ${e.message}`);
+        addLog(`Errore salvataggio: ${e.message}`);
         throw e;
     }
+};
+
+export const checkForUpdatesAndDownload = async (currentDate: string, cb?: any) => {
+    return { hasUpdate: false }; 
 };

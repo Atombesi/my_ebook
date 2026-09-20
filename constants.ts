@@ -1,3 +1,4 @@
+
 export const DEFAULT_CSV_CONTENT = `TEST; 21-09-1956 11:00
 Dante Alighieri;Divina Commedia;PDF
 Dante Alighieri;Vita Nuova;EPUB
@@ -53,14 +54,16 @@ Jane Austen;L'abbazia di Northanger;EPUB`;
 export const STORAGE_KEY_INDEX = 'my_ebook_index_v2';
 export const STORAGE_KEY_NOTE = 'my_ebook_note_v2';
 export const STORAGE_KEY_CONFIG = 'my_ebook_config_v2'; 
-export const STORAGE_KEY_LOGS = 'my_ebook_logs_v1'; // Nuova chiave per i log
+export const STORAGE_KEY_LOGS = 'my_ebook_logs_v1';
+export const STORAGE_KEY_LAST_BACKUP = 'my_ebook_last_backup_v1';
+export const STORAGE_KEY_LOAN_HISTORY = 'my_ebook_loan_history_v1';
 
 export const CSV_SEPARATOR = ';';
 
 // --- DROPBOX CONFIGURATION ---
-// Placeholder for the Folder URL
 export const DEFAULT_DROPBOX_FOLDER_URL = ''; 
 
-// Filenames expected inside the ZIP
+// Filenames
 export const FILE_NAME_DATA = 'Index_data.txt';
 export const FILE_NAME_INDEX = 'Ebook_Index.txt';
+export const FILE_NAME_LAST_UPDATE = 'Last_Update.txt';

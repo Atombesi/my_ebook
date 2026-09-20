@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Book, BookNotes, BookStatus } from '../types';
-import { Check, CheckCircle2, Bookmark, FileSignature, CircleDashed, XCircle, Star } from 'lucide-react';
+import type { Book, BookNotes, BookStatus } from '../types';
+import { Check, CheckCircle2, Bookmark, FileSignature, CircleDashed, XCircle, Star, Globe, ScrollText, UserCheck, UserMinus, Gem, DollarSign, ExternalLink, Image as ImageIcon } from 'lucide-react';
 import { getBookKey } from '../services/csvService';
+import { loadImage } from '../services/imageService';
 
 interface DetailBlockProps {
   book: Book | null;
@@ -10,7 +11,9 @@ interface DetailBlockProps {
   // Callbacks per delegare l'apertura modali al padre (App)
   onRequestStatusChange: (book: Book, targetStatus: BookStatus | null, actionType: 'ADD' | 'REMOVE' | 'SWITCH') => void;
   onRequestNoteEdit: (book: Book) => void;
+  onRequestLoanEdit: (book: Book) => void;
   onRateBook: (book: Book, rating: number) => void;
+  onRequestPhysicalEdit: (book: Book) => void;
 }
 
 export const DetailBlock: React.FC<DetailBlockProps> = ({ 
@@ -19,11 +22,20 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
     bookNotes,
     onRequestStatusChange,
     onRequestNoteEdit,
-    onRateBook
+    onRequestLoanEdit,
+    onRateBook,
+    onRequestPhysicalEdit
 }) => {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  
+  // Stati per la ricerca Web Smart
+  const [webSearchState, setWebSearchState] = useState<{ visible: boolean; query: string }>({ visible: false, query: '' });
+  const [bookImage, setBookImage] = useState<string | null>(null);
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -33,6 +45,15 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
   const currentStatus = currentEntry?.status;
   const currentRating = currentEntry?.rating || 0;
   const hasNote = currentEntry?.note && currentEntry.note.trim().length > 0;
+
+  // Carica immagine se presente
+  useEffect(() => {
+      if (currentEntry?.hasImage && currentKey) {
+          loadImage(currentKey).then(img => setBookImage(img));
+      } else {
+          setBookImage(null);
+      }
+  }, [currentKey, currentEntry?.hasImage]);
 
   // Chiudi menu se clicco fuori
   useEffect(() => {
@@ -50,18 +71,54 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Chiudi menu quando cambia libro
+  // Chiudi menu e prepara ricerca quando cambia libro
   useEffect(() => {
       setIsMenuOpen(false);
-  }, [book?.id]);
+      
+      if (book) {
+          if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+          setWebSearchState({
+              visible: true,
+              query: `il libro ${book.title}, autore,storia,curiosita`
+          });
+          searchTimerRef.current = setTimeout(() => {
+              setWebSearchState(prev => ({ ...prev, visible: false }));
+          }, 10000);
+      } else {
+          setWebSearchState({ visible: false, query: '' });
+          if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      }
+  }, [book?.id]); // Usiamo opzional chaining sulla dipendenza
 
 
   const handlePressStart = (text: string, fieldName: string) => {
     pressTimer.current = setTimeout(() => {
+        // 1. Azione Standard: Copia nella clipboard
         navigator.clipboard.writeText(text).then(() => {
             setCopiedField(fieldName);
             setTimeout(() => setCopiedField(null), 2000);
         });
+
+        // 2. Azione Nuova: Prepara e mostra bottone Ricerca Web
+        let query = "";
+        if (fieldName === 'author') {
+            query = `quali libri ha scritto ${text} (bibliografia)`;
+        } else if (fieldName === 'title') {
+            query = `il libro ${text}, autore,storia,curiosita`;
+        }
+
+        if (query) {
+            // Pulisci eventuale timer precedente di nascondimento
+            if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+
+            setWebSearchState({ visible: true, query });
+
+            // Imposta timer di 10 secondi per nascondere l'icona
+            searchTimerRef.current = setTimeout(() => {
+                setWebSearchState(prev => ({ ...prev, visible: false }));
+            }, 10000);
+        }
+
     }, 600);
   };
 
@@ -72,15 +129,20 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
     }
   };
 
+  const handleWebSearch = () => {
+      if (!webSearchState.query) return;
+      const url = `https://www.google.com/search?q=${encodeURIComponent(webSearchState.query)}`;
+      window.open(url, '_blank');
+      
+      // Nascondi dopo il click
+      setWebSearchState(prev => ({ ...prev, visible: false }));
+  };
+
   const handleMenuSelection = (selectedStatus: BookStatus | null) => {
       if (!book) return;
       
-      // Se seleziono null o TO_READ, il rating non ha senso, quindi il cambio stato (che resetta rating in App.tsx se null) gestisce tutto.
-      // Se seleziono READ, gestisce lo stato.
-
       if (selectedStatus === currentStatus) {
-         if (selectedStatus === null) setIsMenuOpen(false); // Close if clicking None on None
-         // If clicking Read on Read, just keep menu open for rating maybe? Or close? Let's close for consistency.
+         if (selectedStatus === null) setIsMenuOpen(false);
          setIsMenuOpen(false);
          return; 
       }
@@ -96,9 +158,7 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
   };
 
   const handleRatingClick = (e: React.MouseEvent, rating: number) => {
-      e.stopPropagation(); // Don't close menu immediately or allow multiple clicks? 
-      // User requested functionality: stars are selectable.
-      // If status is not READ, clicking a star implies setting it to READ.
+      e.stopPropagation(); 
       if (!book) return;
       onRateBook(book, rating);
   };
@@ -137,9 +197,31 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
                             ref={menuRef}
                             className="absolute bottom-full left-0 mb-2 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-2 z-50"
                         >
+                            {true && (
+                                <button 
+                                    onClick={() => {
+                                        onRequestLoanEdit(book);
+                                        setIsMenuOpen(false);
+                                    }}
+                                    className={`flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors hover:bg-slate-800 border-b border-slate-800 ${!!currentEntry?.destinatarioPrestito ? 'text-orange-400' : 'text-slate-300'}`}
+                                >
+                                    {!!currentEntry?.destinatarioPrestito ? <UserMinus className="w-4 h-4 text-orange-500" /> : <UserCheck className="w-4 h-4" />}
+                                    Prestito
+                                </button>
+                            )}
+                            <button 
+                                onClick={() => {
+                                    onRequestNoteEdit(book);
+                                    setIsMenuOpen(false);
+                                }}
+                                className={`flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors hover:bg-slate-800 ${hasNote ? 'text-indigo-400' : 'text-slate-300'}`}
+                            >
+                                <FileSignature className={`w-4 h-4 ${hasNote ? 'text-indigo-500' : ''}`} />
+                                Note
+                            </button>
                             <button 
                                 onClick={() => handleMenuSelection('READ')}
-                                className={`flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors hover:bg-slate-800 ${currentStatus === 'READ' ? 'text-emerald-400' : 'text-slate-300'}`}
+                                className={`flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors hover:bg-slate-800 border-t border-slate-800 ${currentStatus === 'READ' ? 'text-emerald-400' : 'text-slate-300'}`}
                             >
                                 <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                                 Letto
@@ -157,6 +239,19 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
                             >
                                 <XCircle className="w-4 h-4" />
                                 Nessuno
+                            </button>
+                            
+                            {/* NEW CARTACEO TOGGLE */}
+                            <button 
+                                onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    if(book) onRequestPhysicalEdit(book); 
+                                    setIsMenuOpen(false);
+                                }}
+                                className={`flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors hover:bg-slate-800 border-t border-slate-800 ${currentEntry?.cartaceo ? 'text-amber-300' : 'text-slate-400'}`}
+                            >
+                                <ScrollText className={`w-4 h-4 ${currentEntry?.cartaceo ? 'text-amber-400' : ''}`} />
+                                Edizione Fisica
                             </button>
 
                             {/* RATING SECTION (Solo se LETTO) */}
@@ -208,6 +303,16 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
                     {/* TITOLO */}
                     <div 
                         className="relative group cursor-pointer select-none active:scale-[0.98] transition-transform origin-left"
+                        onClick={() => {
+                            if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+                            setWebSearchState({
+                                visible: true,
+                                query: `il libro ${book.title}, autore,storia,curiosita`
+                            });
+                            searchTimerRef.current = setTimeout(() => {
+                                setWebSearchState(prev => ({ ...prev, visible: false }));
+                            }, 10000);
+                        }}
                         onMouseDown={() => handlePressStart(book.title, 'title')}
                         onMouseUp={handlePressEnd}
                         onMouseLeave={handlePressEnd}
@@ -243,6 +348,17 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
                             <span className="text-white font-bold ml-2 shrink-0 whitespace-nowrap">
                                 ({book.format})
                             </span>
+
+                            {/* ICONA PREGIATA */}
+                            {currentEntry?.pregiata && (
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); setIsImageModalOpen(true); }}
+                                    className="ml-2 p-1.5 rounded-full border shadow-sm transition-all active:scale-95 bg-purple-900/50 border-purple-500/50 text-purple-400 hover:text-purple-300 hover:bg-purple-800/50"
+                                    title="Dettagli Edizione Pregiata"
+                                >
+                                    <Gem className="w-3.5 h-3.5" />
+                                </button>
+                            )}
                         </div>
                         
                         {copiedField === 'author' && (
@@ -253,19 +369,32 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
                     </div>
                 </div>
 
-                {/* DESTRA: PULSANTE NOTE (UNICO) */}
-                <div className="flex flex-col gap-2 shrink-0">
-                    <button 
-                        onClick={() => onRequestNoteEdit(book)}
+                {/* DESTRA: PULSANTE RICERCA WEB */}
+                <div className="flex flex-col gap-1 shrink-0 items-center justify-start mt-1">
+                    <button
+                        onClick={() => {
+                            if (webSearchState.query) {
+                                handleWebSearch();
+                            } else {
+                                // Default search if no specific query is active
+                                const defaultQuery = `${book.title} ${book.author}`;
+                                window.open(`https://www.google.com/search?q=${encodeURIComponent(defaultQuery)}`, '_blank');
+                            }
+                        }}
                         className={`
-                            mt-1 p-3 rounded-full border shadow-sm transition-all active:scale-95
-                            ${hasNote 
-                                ? 'bg-indigo-600 border-indigo-400 text-white shadow-indigo-900/50' 
-                                : 'bg-slate-800/50 border-slate-700/50 text-slate-500 hover:text-indigo-400'}
+                            p-3 rounded-full border shadow-sm transition-all active:scale-95 relative
+                            ${webSearchState.visible 
+                                ? 'bg-sky-600 border-sky-400 text-white shadow-sky-900/50 animate-pulse' 
+                                : 'bg-slate-800/50 border-slate-700/50 text-slate-500 hover:text-sky-400'}
                         `}
-                        title="Gestisci Note"
+                        title="Cerca su Google"
                     >
-                        <FileSignature className="w-6 h-6" />
+                        <Globe className="w-6 h-6" />
+                        {webSearchState.visible && (
+                            <span className="absolute -top-1 -right-1 bg-sky-500 text-white text-[8px] font-bold px-1 rounded-full border border-sky-900">
+                                {webSearchState.query.includes('bibliografia') ? 'Aut' : 'Tit'}
+                            </span>
+                        )}
                     </button>
                 </div>
 
@@ -276,6 +405,70 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
             <div className="h-24 flex flex-col items-center justify-center text-slate-400 gap-2 opacity-60">
                 <Bookmark className="w-8 h-8 stroke-1 drop-shadow-md" />
                 <p className="text-xs italic drop-shadow-md">Seleziona un libro</p>
+            </div>
+        )}
+
+        {/* MODALE IMMAGINE PREGIATA */}
+        {isImageModalOpen && currentEntry?.pregiata && (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" onClick={() => setIsImageModalOpen(false)}>
+                <div 
+                    className="bg-slate-900 border border-purple-500/30 rounded-2xl p-4 max-w-sm w-full max-h-[90vh] overflow-y-auto flex flex-col items-center gap-4 relative shadow-2xl"
+                    onClick={e => e.stopPropagation()}
+                >
+                    <button 
+                        onClick={() => setIsImageModalOpen(false)}
+                        className="absolute top-2 right-2 p-2 text-slate-400 hover:text-white bg-slate-800 rounded-full z-10"
+                    >
+                        <XCircle className="w-6 h-6" />
+                    </button>
+
+                    <div className="flex items-center gap-2 text-purple-400 mb-2 mt-4">
+                        <Gem className="w-5 h-5" />
+                        <h3 className="font-bold text-lg">Edizione Particolare</h3>
+                    </div>
+
+                    {bookImage ? (
+                        <div className="w-full aspect-[2/3] rounded-lg overflow-hidden border border-slate-700 shadow-inner bg-black shrink-0">
+                            <img src={bookImage} alt="Copertina" className="w-full h-full object-contain" />
+                        </div>
+                    ) : currentEntry.hasImage ? (
+                        <div className="w-full aspect-[2/3] rounded-lg bg-slate-800 border border-slate-700 flex flex-col items-center justify-center animate-pulse gap-2 shrink-0">
+                            <ImageIcon className="w-10 h-10 text-slate-600" />
+                            <span className="text-slate-500 text-sm">Caricamento...</span>
+                        </div>
+                    ) : (
+                        <div className="w-full aspect-[2/3] rounded-lg bg-slate-800/50 border border-slate-700 flex flex-col items-center justify-center gap-2 shrink-0">
+                            <ImageIcon className="w-10 h-10 text-slate-600 opacity-50" />
+                            <span className="text-slate-500 text-sm italic">Nessuna immagine</span>
+                        </div>
+                    )}
+
+                    <div className="w-full flex items-stretch justify-between gap-2 mt-2 h-12">
+                        {currentEntry.valore && (
+                            <div className="flex items-center justify-center gap-1 text-yellow-400 bg-black px-4 rounded-lg border border-yellow-400/20 shrink-0">
+                                <DollarSign className="w-4 h-4" />
+                                <span className="font-bold">{currentEntry.valore}</span>
+                            </div>
+                        )}
+                        
+                        {currentEntry.linkWeb && (
+                            <button 
+                                onClick={() => window.open(currentEntry.linkWeb, '_blank')}
+                                className="flex-1 flex items-center justify-center gap-2 text-sky-400 hover:text-sky-300 bg-sky-400/10 rounded-lg font-medium border border-sky-400/20 transition-colors"
+                            >
+                                <ExternalLink className="w-4 h-4" />
+                                <span className="text-sm">Open Link</span>
+                            </button>
+                        )}
+
+                        <button 
+                            onClick={() => setIsImageModalOpen(false)}
+                            className="flex items-center justify-center px-4 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold transition-colors border border-slate-700 shrink-0"
+                        >
+                            <XCircle className="w-5 h-5" />
+                        </button>
+                    </div>
+                </div>
             </div>
         )}
       </div>
