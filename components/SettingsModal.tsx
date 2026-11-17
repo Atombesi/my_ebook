@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Link as LinkIcon, FolderOpen, Terminal, ChevronRight, ChevronDown, Sliders, Database, Network, ArrowLeft, CloudCog, FileText, Activity, QrCode, Download, CheckCircle2 } from 'lucide-react';
+import { X, Save, Link as LinkIcon, FolderOpen, Terminal, ChevronRight, ChevronDown, Sliders, Database, Network, ArrowLeft, CloudCog, FileText, Activity, QrCode, Download, CheckCircle2, SlidersHorizontal, Check, Info } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
-import { loadSettings, saveSettings, exportBackupData, importBackupData, getLastBackupInfo, saveLastBackupInfo, BackupInfo } from '../services/csvService';
+import { loadSettings, saveSettings, exportBackupData, importBackupData, getLastBackupInfo, saveLastBackupInfo, BackupInfo, DEFAULT_SWIPE_FILTERS } from '../services/csvService';
 import { getLogs, clearLogs, testProxyConnection } from '../services/syncService';
-import { AppSettings } from '../types';
+import { AppSettings, FilterOption } from '../types';
 import { STORAGE_KEY_NOTE } from '../constants';
 import { FilePicker } from '@capawesome/capacitor-file-picker';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
@@ -17,6 +17,7 @@ interface SettingsModalProps {
   hideLogs?: boolean;
   onSave?: (settings: AppSettings) => void;
   onDataRestored?: () => void;
+  onOpenLoanHistory?: () => void;
 }
 
 interface BackupSuccessState {
@@ -28,7 +29,20 @@ interface BackupSuccessState {
 
 type SettingsView = 'MAIN' | 'DOWNLOAD_SETTINGS';
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, hideLogs = false, onSave, onDataRestored }) => {
+const SWIPE_FILTER_OPTIONS: { value: FilterOption; label: string }[] = [
+    { value: 'ALL', label: 'Tutti' },
+    { value: 'TO_READ', label: 'Da leggere' },
+    { value: 'READ', label: 'Letti' },
+    { value: 'PAPERBACK', label: 'Cartacei' },
+    { value: 'LOANED', label: 'In Prestito' },
+    { value: 'RATED', label: 'Valutati' },
+    { value: 'EBOOK', label: 'Solo Ebook' },
+    { value: 'PREGIATA', label: 'Pregiati' },
+    { value: 'MANUAL', label: 'Aggiunti a Mano' },
+    { value: 'NOTES', label: 'Con Note' }
+];
+
+export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, hideLogs = false, onSave, onDataRestored, onOpenLoanHistory }) => {
   const [currentView, setCurrentView] = useState<SettingsView>('MAIN');
 
   const [uiOpacity, setUiOpacity] = useState(0.3);
@@ -41,6 +55,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, h
   
   // Last Update URL (NEW)
   const [tempUpdateUrl, setTempUpdateUrl] = useState('');
+  
+  // Swipe Filters Carousel
+  const [tempSwipeFilters, setTempSwipeFilters] = useState<FilterOption[]>(DEFAULT_SWIPE_FILTERS);
+  const [showSwipeSettings, setShowSwipeSettings] = useState(false);
   
   // Proxy
   const [tempProxyInput, setTempProxyInput] = useState('');
@@ -61,6 +79,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, h
   
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [showUpdateUrlInput, setShowUpdateUrlInput] = useState(false); // New accordion
+  const [showUpdateFileInfo, setShowUpdateFileInfo] = useState(false); // Info toggle
   const [showProxyInput, setShowProxyInput] = useState(false);
   const [showConsole, setShowConsole] = useState(false);
   
@@ -80,9 +99,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, h
       setShowVisuals(false);
       setShowUrlInput(false);
       setShowUpdateUrlInput(false);
+      setShowUpdateFileInfo(false);
       setShowProxyInput(false);
       setShowConsole(false);
       setShowQrCode(false);
+      setShowSwipeSettings(false);
       setQrInput('');
       setCurrentView('MAIN');
 
@@ -93,6 +114,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, h
       setTempUrlInput(''); 
 
       setTempUpdateUrl(settings.lastUpdateUrl || '');
+      setTempSwipeFilters(settings.swipeFilters || DEFAULT_SWIPE_FILTERS);
 
       const currentProxy = settings.customProxyUrl || '';
       setHasConfiguredProxy(currentProxy.trim().length > 0);
@@ -113,6 +135,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, h
     }
   }, [isOpen, hideLogs]);
 
+  const handleToggleSwipeFilter = (filter: FilterOption) => {
+      setTempSwipeFilters(prev => {
+          if (prev.includes(filter)) {
+              const next = prev.filter(f => f !== filter);
+              return next.length > 0 ? next : ['ALL'];
+          } else {
+              return [...prev, filter];
+          }
+      });
+  };
+
   const handleSaveUrlOnly = () => {
       let url = tempUrlInput.trim();
       if (!url.startsWith('http')) {
@@ -131,7 +164,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, h
       const currentSettings = loadSettings();
       const newSettings: AppSettings = { ...currentSettings, lastUpdateUrl: tempUpdateUrl.trim() };
       saveSettings(newSettings);
-      alert("Link Versione salvato.");
+      alert("Link Ebook_update.txt salvato.");
   };
 
   const handleSaveProxyOnly = () => {
@@ -200,7 +233,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, h
         lastUpdateUrl: tempUpdateUrl.trim(),
         customProxyUrl: proxyToSave,
         uiOpacity,
-        debugMode
+        debugMode,
+        swipeFilters: tempSwipeFilters
     };
     
     saveSettings(newSettings);
@@ -224,7 +258,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, h
     }
     setShowDbInspector(true);
   };
-  const handleExportSharePrepare = () => { setPendingFilename(`backup_${new Date().toISOString().split('T')[0]}.json`); setShareOptionsPrompt(true); };
+  const getBackupFilename = () => {
+      const now = new Date();
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      const dStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`;
+      return `MyEbook_backup_${dStr}.json`;
+  };
+
+  const handleExportSharePrepare = () => { setPendingFilename(getBackupFilename()); setShareOptionsPrompt(true); };
   const handleExportShareExecute = async (includeImages: boolean) => {
       setShareOptionsPrompt(false);
       setIsProcessing(true);
@@ -255,7 +296,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, h
         saveLastBackupInfo(filename); setLastBackup(getLastBackupInfo()); setBackupSuccess({ isOpen: true, mode: 'EXPORT', filename, resultLabel: 'Condiviso' });
       } catch (e:any) { alert("Errore Export: " + e.message); } finally { setIsProcessing(false); setProcessingStatus(''); }
   };
-  const handleSaveDiskPrepare = () => { setDiskSaveConfirm({ filename: `backup_${new Date().toISOString().split('T')[0]}.json` }); };
+  const handleSaveDiskPrepare = () => { setDiskSaveConfirm({ filename: getBackupFilename() }); };
   const handleSaveDiskExecute = async () => {
       if(!diskSaveConfirm) return;
       setIsProcessing(true);
@@ -512,6 +553,67 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, h
                       {showVisuals && ( <div className="p-3 bg-slate-950/30 rounded border border-slate-800/50"> <input type="range" min="0" max="1" step="0.05" value={uiOpacity} onChange={(e) => setUiOpacity(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"/> </div> )}
                   </div>
 
+                  {onOpenLoanHistory && (
+                      <div className="flex flex-col gap-2">
+                          <button onClick={() => { onClose(); onOpenLoanHistory(); }} className="flex items-center justify-between w-full p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 text-slate-300 font-medium text-sm">
+                              <div className="flex items-center gap-2">
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-orange-400">
+                                      <path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 6-6"/>
+                                  </svg>
+                                  Archivio Prestiti
+                              </div>
+                          </button>
+                      </div>
+                  )}
+
+                  {/* CAROSELLO FILTRI (SWIPE) */}
+                  <div className="flex flex-col gap-2">
+                      <button onClick={() => setShowSwipeSettings(!showSwipeSettings)} className="flex items-center justify-between w-full p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 text-slate-300 font-medium text-sm">
+                          <div className="flex items-center gap-2"><SlidersHorizontal className="w-4 h-4 text-amber-400" />Carosello Filtri (Swipe)</div>{showSwipeSettings ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                      </button>
+                      {showSwipeSettings && (
+                        <div className="space-y-3 p-3 bg-slate-950/30 rounded border border-slate-800/50 animate-in fade-in duration-200">
+                            <p className="text-[11px] text-slate-400 leading-tight">
+                              Seleziona quali categorie includere nello scorrimento con il dito (swipe a dx/sx). Se lasci spuntato solo <b>Tutti</b>, lo swipe sarà disattivato.
+                            </p>
+                            <div className="grid grid-cols-2 gap-2 mt-1">
+                                {SWIPE_FILTER_OPTIONS.map(opt => {
+                                    const isChecked = tempSwipeFilters.includes(opt.value);
+                                    return (
+                                        <button
+                                            key={opt.value}
+                                            type="button"
+                                            onClick={() => handleToggleSwipeFilter(opt.value)}
+                                            className={`flex items-center gap-2 p-2 rounded-lg text-xs font-medium border text-left transition-all ${
+                                                isChecked 
+                                                    ? 'bg-amber-600/20 border-amber-500/50 text-amber-300' 
+                                                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
+                                            }`}
+                                        >
+                                            <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
+                                                isChecked ? 'bg-amber-500 border-amber-500 text-slate-950' : 'border-slate-600'
+                                            }`}>
+                                                {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
+                                            </div>
+                                            <span className="truncate">{opt.label}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <div className="flex justify-between items-center pt-2 border-t border-slate-800/50 text-[10px] text-slate-500">
+                                <span>{tempSwipeFilters.length} filtri attivi nel carosello</span>
+                                <button 
+                                    type="button"
+                                    onClick={() => setTempSwipeFilters(['ALL'])} 
+                                    className="text-amber-400 hover:underline"
+                                >
+                                    Disattiva (Solo Tutti)
+                                </button>
+                            </div>
+                        </div>
+                      )}
+                  </div>
+
                   {/* QR CODE GENERATOR */}
                   <div className="flex flex-col gap-2">
                       <button onClick={() => setShowQrCode(!showQrCode)} className="flex items-center justify-between w-full p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 text-slate-300 font-medium text-sm">
@@ -547,44 +649,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, h
                       )}
                   </div>
 
-                  <button onClick={() => setCurrentView('DOWNLOAD_SETTINGS')} className="flex items-center justify-between w-full p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 text-slate-300 font-medium text-sm">
-                      <div className="flex items-center gap-2"><CloudCog className="w-4 h-4 text-purple-400" />Setting Index download</div><ChevronRight className="w-4 h-4 text-slate-500" />
-                  </button>
-              </>
-          )}
-
-          {currentView === 'DOWNLOAD_SETTINGS' && (
-              <div className="flex flex-col gap-4">
-                  {/* DROPBOX FOLDER */}
-                  <div className="flex flex-col gap-2">
-                      <button onClick={() => setShowUrlInput(!showUrlInput)} className="flex items-center justify-between w-full p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 text-slate-300 font-medium text-sm">
-                          <div className="flex items-center gap-2"><FolderOpen className="w-4 h-4 text-emerald-400" />Link to file index</div>{showUrlInput ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                      </button>
-                      {showUrlInput && (
-                        <div className="space-y-3 p-2 bg-slate-950/30 rounded border border-slate-800/50">
-                            <div className="flex justify-between px-1 text-[11px] text-slate-400"><span>Stato:</span>{hasConfiguredUrl ? <span className="text-emerald-400 font-bold">Configurato</span> : <span className="text-red-400">Mancante</span>}</div>
-                            <div className="relative"><textarea value={tempUrlInput} onChange={(e) => setTempUrlInput(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-200 h-16 resize-none" placeholder="https://dropbox.com/scl/fo/..."/>{showLinkSaveButton && (<button onClick={handleSaveUrlOnly} className="absolute bottom-2 right-2 bg-emerald-600 text-white px-2 py-1 rounded text-[10px]">Salva</button>)}</div>
-                        </div>
-                      )}
-                  </div>
-
-                  {/* LAST UPDATE URL (NEW) */}
-                  <div className="flex flex-col gap-2">
-                      <button onClick={() => setShowUpdateUrlInput(!showUpdateUrlInput)} className="flex items-center justify-between w-full p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 text-slate-300 font-medium text-sm">
-                          <div className="flex items-center gap-2"><FileText className="w-4 h-4 text-sky-400" />File Versione (Opzionale)</div>{showUpdateUrlInput ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                      </button>
-                      {showUpdateUrlInput && (
-                        <div className="space-y-3 p-2 bg-slate-950/30 rounded border border-slate-800/50 animate-in fade-in slide-in-from-top-2">
-                            <p className="text-[10px] text-slate-500 leading-tight">Link diretto a <b>Last_Update.txt</b>. Se presente, l'app scaricherà solo questo file per controllare gli aggiornamenti.</p>
-                            <div className="flex flex-col gap-2">
-                                <input type="text" value={tempUpdateUrl} onChange={(e) => setTempUpdateUrl(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-200 font-mono" placeholder="https://dropbox.com/.../Last_Update.txt?dl=1" />
-                                <button onClick={handleSaveUpdateUrlOnly} className="self-end bg-sky-600 hover:bg-sky-500 text-white px-3 py-1.5 rounded text-xs font-bold">Salva Link Versione</button>
-                            </div>
-                        </div>
-                      )}
-                  </div>
-
-
                   {/* LOGS */}
                   {!hideLogs && (
                     <div className="flex flex-col gap-2">
@@ -599,6 +663,84 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, h
                         )}
                     </div>
                   )}
+
+                  <button onClick={() => setCurrentView('DOWNLOAD_SETTINGS')} className="flex items-center justify-between w-full p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 text-slate-300 font-medium text-sm">
+                      <div className="flex items-center gap-2"><CloudCog className="w-4 h-4 text-purple-400" />Setting Index download</div><ChevronRight className="w-4 h-4 text-slate-500" />
+                  </button>
+              </>
+          )}
+
+          {currentView === 'DOWNLOAD_SETTINGS' && (
+              <div className="flex flex-col gap-4">
+                  {/* EBOOK INDEX FILE / ZIP */}
+                  <div className="flex flex-col gap-2">
+                      <button onClick={() => setShowUrlInput(!showUrlInput)} className="flex items-center justify-between w-full p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 text-slate-300 font-medium text-sm">
+                          <div className="flex items-center gap-2"><FolderOpen className="w-4 h-4 text-emerald-400" />Link Ebook_index.txt (o .zip)</div>{showUrlInput ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                      </button>
+                      {showUrlInput && (
+                        <div className="space-y-3 p-2 bg-slate-950/30 rounded border border-slate-800/50">
+                            <div className="flex justify-between px-1 text-[11px] text-slate-400"><span>Stato:</span>{hasConfiguredUrl ? <span className="text-emerald-400 font-bold">Configurato</span> : <span className="text-red-400">Mancante</span>}</div>
+                            <p className="text-[10px] text-slate-500 leading-tight">Link diretto al file <b>Ebook_index.txt</b> (oppure cartella/archivio .zip con l'indice).</p>
+                            <div className="relative"><textarea value={tempUrlInput} onChange={(e) => setTempUrlInput(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-200 h-16 resize-none font-mono" placeholder="https://dropbox.com/.../Ebook_index.txt?dl=1"/>{showLinkSaveButton && (<button onClick={handleSaveUrlOnly} className="absolute bottom-2 right-2 bg-emerald-600 text-white px-2 py-1 rounded text-[10px]">Salva</button>)}</div>
+                        </div>
+                      )}
+                  </div>
+
+                  {/* EBOOK UPDATE TXT */}
+                  <div className="flex flex-col gap-2">
+                      <button onClick={() => setShowUpdateUrlInput(!showUpdateUrlInput)} className="flex items-center justify-between w-full p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 text-slate-300 font-medium text-sm">
+                          <div className="flex items-center gap-2"><FileText className="w-4 h-4 text-sky-400" />Link Ebook_update.txt</div>{showUpdateUrlInput ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                      </button>
+                      {showUpdateUrlInput && (
+                        <div className="space-y-3 p-2 bg-slate-950/30 rounded border border-slate-800/50 animate-in fade-in slide-in-from-top-2">
+                            <div className="flex flex-col gap-2">
+                                <input 
+                                  type="text" 
+                                  value={tempUpdateUrl} 
+                                  onChange={(e) => setTempUpdateUrl(e.target.value)} 
+                                  className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-200 font-mono" 
+                                  placeholder="https://dropbox.com/.../Ebook_update.txt?dl=1" 
+                                />
+                                <div className="flex items-center justify-between gap-2 pt-1">
+                                    <button 
+                                      type="button"
+                                      onClick={() => setShowUpdateFileInfo(!showUpdateFileInfo)}
+                                      className={`p-1.5 rounded-lg border transition-all flex items-center gap-1.5 text-xs ${showUpdateFileInfo ? 'bg-sky-500/20 text-sky-300 border-sky-500/40' : 'bg-slate-800/70 text-slate-400 border-slate-700/60 hover:text-slate-200'}`}
+                                      title="Mostra/Nascondi informazioni sulla struttura del file"
+                                    >
+                                      <Info className="w-4 h-4" />
+                                      <span className="text-[11px]">Info file</span>
+                                    </button>
+
+                                    <button 
+                                      onClick={handleSaveUpdateUrlOnly} 
+                                      className="bg-sky-600 hover:bg-sky-500 text-white px-3 py-1.5 rounded text-xs font-bold transition-all active:scale-95"
+                                    >
+                                      Salva Link
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Informazioni a comparsa attivate solo premendo l'icona (i) */}
+                            {showUpdateFileInfo && (
+                              <div className="space-y-2 p-2.5 bg-slate-900 rounded border border-slate-800 font-sans text-xs text-slate-300 animate-in fade-in duration-150">
+                                  <p className="text-[10px] text-slate-400 leading-tight">
+                                    Struttura del file <b>Ebook_update.txt</b>:
+                                  </p>
+                                  <div className="p-2 bg-slate-950/70 rounded border border-slate-800 font-mono text-[10px] text-emerald-400 leading-relaxed">
+                                    EBOOK_INDEX;10/11/2026 15:46<br />
+                                    Ver;2.9<br />
+                                    <span className="text-orange-400">AppUrl;https://dropbox.com/.../app.apk?dl=1</span><br />
+                                    <span className="text-sky-300">VersionInfo;Aggiunto swipe carosello filtri e note rapide</span>
+                                  </div>
+                                  <p className="text-[9px] text-slate-500 italic leading-tight">
+                                    Nota: "AppUrl;" e "VersionInfo;" sono facoltativi. Se "VersionInfo;" contiene una descrizione, verrà mostrata all'utente nella finestra quando c'è una nuova versione.
+                                  </p>
+                              </div>
+                            )}
+                        </div>
+                      )}
+                  </div>
               </div>
           )}
         </div>

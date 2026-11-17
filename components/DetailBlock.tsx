@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { Book, BookNotes, BookStatus } from '../types';
-import { Check, CheckCircle2, Bookmark, FileSignature, CircleDashed, XCircle, Star, Globe, Book as BookIcon, UserCheck, UserMinus, Gem, DollarSign, ExternalLink, Image as ImageIcon } from 'lucide-react';
+import { Check, CheckCircle2, Bookmark, FileSignature, CircleDashed, XCircle, Star, Globe, ScrollText, UserCheck, UserMinus, Gem, DollarSign, ExternalLink, Image as ImageIcon } from 'lucide-react';
 import { getBookKey } from '../services/csvService';
 import { loadImage } from '../services/imageService';
 
@@ -71,12 +71,24 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Chiudi menu e resetta ricerca quando cambia libro
+  // Chiudi menu e prepara ricerca quando cambia libro
   useEffect(() => {
       setIsMenuOpen(false);
-      setWebSearchState({ visible: false, query: '' });
-      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-  }, [book?.id]);
+      
+      if (book) {
+          if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+          setWebSearchState({
+              visible: true,
+              query: `il libro ${book.title}, autore,storia,curiosita`
+          });
+          searchTimerRef.current = setTimeout(() => {
+              setWebSearchState(prev => ({ ...prev, visible: false }));
+          }, 10000);
+      } else {
+          setWebSearchState({ visible: false, query: '' });
+          if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      }
+  }, [book?.id]); // Usiamo opzional chaining sulla dipendenza
 
 
   const handlePressStart = (text: string, fieldName: string) => {
@@ -129,12 +141,8 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
   const handleMenuSelection = (selectedStatus: BookStatus | null) => {
       if (!book) return;
       
-      // Se seleziono null o TO_READ, il rating non ha senso, quindi il cambio stato (che resetta rating in App.tsx se null) gestisce tutto.
-      // Se seleziono READ, gestisce lo stato.
-
       if (selectedStatus === currentStatus) {
-         if (selectedStatus === null) setIsMenuOpen(false); // Close if clicking None on None
-         // If clicking Read on Read, just keep menu open for rating maybe? Or close? Let's close for consistency.
+         if (selectedStatus === null) setIsMenuOpen(false);
          setIsMenuOpen(false);
          return; 
       }
@@ -150,9 +158,7 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
   };
 
   const handleRatingClick = (e: React.MouseEvent, rating: number) => {
-      e.stopPropagation(); // Don't close menu immediately or allow multiple clicks? 
-      // User requested functionality: stars are selectable.
-      // If status is not READ, clicking a star implies setting it to READ.
+      e.stopPropagation(); 
       if (!book) return;
       onRateBook(book, rating);
   };
@@ -191,7 +197,7 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
                             ref={menuRef}
                             className="absolute bottom-full left-0 mb-2 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-2 z-50"
                         >
-                            {currentEntry?.cartaceo && (
+                            {true && (
                                 <button 
                                     onClick={() => {
                                         onRequestLoanEdit(book);
@@ -242,9 +248,9 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
                                     if(book) onRequestPhysicalEdit(book); 
                                     setIsMenuOpen(false);
                                 }}
-                                className={`flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors hover:bg-slate-800 border-t border-slate-800 ${currentEntry?.cartaceo ? 'text-emerald-400' : 'text-slate-400'}`}
+                                className={`flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors hover:bg-slate-800 border-t border-slate-800 ${currentEntry?.cartaceo ? 'text-amber-300' : 'text-slate-400'}`}
                             >
-                                <BookIcon className={`w-4 h-4 ${currentEntry?.cartaceo ? 'text-emerald-500' : ''}`} />
+                                <ScrollText className={`w-4 h-4 ${currentEntry?.cartaceo ? 'text-amber-400' : ''}`} />
                                 Edizione Fisica
                             </button>
 
@@ -297,6 +303,16 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
                     {/* TITOLO */}
                     <div 
                         className="relative group cursor-pointer select-none active:scale-[0.98] transition-transform origin-left"
+                        onClick={() => {
+                            if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+                            setWebSearchState({
+                                visible: true,
+                                query: `il libro ${book.title}, autore,storia,curiosita`
+                            });
+                            searchTimerRef.current = setTimeout(() => {
+                                setWebSearchState(prev => ({ ...prev, visible: false }));
+                            }, 10000);
+                        }}
                         onMouseDown={() => handlePressStart(book.title, 'title')}
                         onMouseUp={handlePressEnd}
                         onMouseLeave={handlePressEnd}
@@ -368,14 +384,20 @@ export const DetailBlock: React.FC<DetailBlockProps> = ({
                         className={`
                             p-3 rounded-full border shadow-sm transition-all active:scale-95 relative
                             ${webSearchState.visible 
-                                ? 'bg-sky-600 border-sky-400 text-white shadow-sky-900/50 animate-pulse' 
+                                ? (webSearchState.query.includes('bibliografia')
+                                    ? 'bg-emerald-600 border-emerald-400 text-white shadow-emerald-900/50 animate-pulse'
+                                    : 'bg-sky-600 border-sky-400 text-white shadow-sky-900/50 animate-pulse')
                                 : 'bg-slate-800/50 border-slate-700/50 text-slate-500 hover:text-sky-400'}
                         `}
                         title="Cerca su Google"
                     >
                         <Globe className="w-6 h-6" />
                         {webSearchState.visible && (
-                            <span className="absolute -top-1 -right-1 bg-sky-500 text-white text-[8px] font-bold px-1 rounded-full border border-sky-900">
+                            <span className={`absolute -top-1 -right-1 text-white text-[8px] font-bold px-1 rounded-full border ${
+                                webSearchState.query.includes('bibliografia') 
+                                    ? 'bg-emerald-500 border-emerald-900' 
+                                    : 'bg-sky-500 border-sky-900'
+                            }`}>
                                 {webSearchState.query.includes('bibliografia') ? 'Aut' : 'Tit'}
                             </span>
                         )}

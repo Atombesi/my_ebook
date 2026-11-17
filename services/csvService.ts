@@ -1,10 +1,11 @@
-import { Book, AppData, IndexMetadata, AppSettings, BookNotes, BookNoteEntry, BookStatus } from '../types';
+import { Book, AppData, IndexMetadata, AppSettings, BookNotes, BookNoteEntry, BookStatus, LoanRecord, FilterOption } from '../types';
 import { 
   DEFAULT_CSV_CONTENT, 
   STORAGE_KEY_INDEX, 
   STORAGE_KEY_NOTE, 
   STORAGE_KEY_CONFIG, 
   STORAGE_KEY_LAST_BACKUP,
+  STORAGE_KEY_LOAN_HISTORY,
   CSV_SEPARATOR,
   DEFAULT_DROPBOX_FOLDER_URL
 } from '../constants';
@@ -28,6 +29,8 @@ export const saveRawIndex = (content: string): void => {
   localStorage.setItem(STORAGE_KEY_INDEX, content);
 };
 
+export const DEFAULT_SWIPE_FILTERS: FilterOption[] = ['ALL', 'TO_READ', 'READ', 'PAPERBACK', 'LOANED'];
+
 // --- SETTINGS MANAGEMENT ---
 export const loadSettings = (): AppSettings => {
   const rawConfig = localStorage.getItem(STORAGE_KEY_CONFIG);
@@ -41,7 +44,8 @@ export const loadSettings = (): AppSettings => {
     lastUpdateUrl: '', // Default empty
     customProxyUrl: DEFAULT_PROXY, 
     uiOpacity: 0.6, 
-    debugMode: false
+    debugMode: false,
+    swipeFilters: DEFAULT_SWIPE_FILTERS
   };
 
   if (rawConfig) {
@@ -52,7 +56,10 @@ export const loadSettings = (): AppSettings => {
             lastUpdateUrl: parsed.lastUpdateUrl || '',
             customProxyUrl: parsed.customProxyUrl !== undefined ? parsed.customProxyUrl : DEFAULT_PROXY,
             uiOpacity: parsed.uiOpacity !== undefined ? parsed.uiOpacity : 0.6,
-            debugMode: parsed.debugMode !== undefined ? parsed.debugMode : false
+            debugMode: parsed.debugMode !== undefined ? parsed.debugMode : false,
+            swipeFilters: Array.isArray(parsed.swipeFilters) && parsed.swipeFilters.length > 0
+                ? parsed.swipeFilters
+                : DEFAULT_SWIPE_FILTERS
         };
     } catch (e) {
         console.error("Error loading settings", e);
@@ -106,6 +113,22 @@ export const saveNotes = (notes: BookNotes): void => {
     localStorage.setItem(STORAGE_KEY_NOTE, JSON.stringify(notes));
 };
 
+// --- LOAN HISTORY MANAGEMENT ---
+
+export const loadLoanHistory = (): LoanRecord[] => {
+    const raw = localStorage.getItem(STORAGE_KEY_LOAN_HISTORY);
+    if (!raw) return [];
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return [];
+    }
+};
+
+export const saveLoanHistory = (history: LoanRecord[]): void => {
+    localStorage.setItem(STORAGE_KEY_LOAN_HISTORY, JSON.stringify(history));
+};
+
 // --- BACKUP MANAGEMENT ---
 
 export interface BackupInfo {
@@ -137,12 +160,14 @@ export const saveLastBackupInfo = (filename: string): void => {
 export const exportBackupData = (): string => {
     const notes = loadNotes();
     const settings = loadSettings();
+    const loanHistory = loadLoanHistory();
     
     const backupObject = {
         version: 1,
         date: new Date().toISOString(),
         notes: notes,
-        settings: settings
+        settings: settings,
+        loanHistory: loanHistory
     };
     
     return JSON.stringify(backupObject, null, 2);
@@ -160,6 +185,10 @@ export const importBackupData = (jsonString: string): boolean => {
 
         if (backupObject.settings) {
             saveSettings(backupObject.settings);
+        }
+
+        if (backupObject.loanHistory) {
+            saveLoanHistory(backupObject.loanHistory);
         }
 
         return true;

@@ -18,10 +18,22 @@ export interface AppData {
 
 export interface AppSettings {
   folderUrl: string;
-  lastUpdateUrl?: string; // New: Direct link to Last_Update.txt
+  lastUpdateUrl?: string; // Direct link to Ebook_update.txt
   customProxyUrl?: string; 
   uiOpacity?: number;
   debugMode?: boolean;
+  swipeFilters?: FilterOption[]; // Filtri abilitati per il carosello swipe
+}
+
+export interface LoanRecord {
+  id: string; // uuid
+  bookKey: string;
+  title: string;
+  author: string;
+  recipient: string;
+  loanDate: string;
+  returnDate?: string | null;
+  isPhysical: boolean;
 }
 
 export type BookStatus = 'READ' | 'TO_READ';

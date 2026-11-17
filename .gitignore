@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# Archivi locali
+_file zip e apk/
+
+# Appunti e file temporanei
+storico_prompt.txt
+~$*
