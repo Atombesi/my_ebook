@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { IndexMetadata, AppSettings } from '../types';
-import { DownloadCloud, Settings, Loader2, AlertTriangle, CheckCircle2, ArrowDownToLine, Server, FileArchive, Zap, Smartphone, ExternalLink, Download } from 'lucide-react';
+import { DownloadCloud, Settings, ScanBarcode, Loader2, AlertTriangle, CheckCircle2, ArrowDownToLine, Server, FileArchive, Zap, Smartphone, ExternalLink, Download } from 'lucide-react';
 import { checkVersion, performDownload, applyUpdate, addLog, checkAppVersion, CheckResult } from '../services/syncService';
 import { SettingsModal } from './SettingsModal';
+import { ISBNScanner } from './ISBNScanner';
 import { InfoModal } from './InfoModal';
 import { loadSettings } from '../services/csvService';
 import { APP_VERSION } from '../version';
@@ -41,6 +42,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [isDownloading, setIsDownloading] = useState(false);
   const [updateError, setUpdateError] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showISBNScanner, setShowISBNScanner] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [isOnboarding, setIsOnboarding] = useState(false); 
   const [updatesModal, setUpdatesModal] = useState<UpdatesState>({ isOpen: false });
@@ -234,7 +236,16 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
           
+
           <div className="flex items-center gap-2">
+            <button
+                  onClick={() => setShowISBNScanner(true)}
+                 title="Scansiona ISBN"
+                 aria-label="Scansiona ISBN"
+                 className="p-1.5 rounded-full bg-slate-800/40 text-slate-300 hover:text-emerald-400 transition-all active:scale-95 shadow-sm"
+            >
+                 <ScanBarcode className="w-4 h-4" />
+            </button>
               <button 
                   onClick={() => { setIsOnboarding(false); setShowSettings(true); }}
                   className="p-1.5 rounded-full bg-slate-800/40 text-slate-300 hover:text-white transition-all active:scale-95 shadow-sm"
@@ -300,7 +311,10 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
       </div>
-
+<ISBNScanner
+    isOpen={showISBNScanner}
+    onClose={() => setShowISBNScanner(false)}
+/>
       <SettingsModal 
         isOpen={showSettings} 
         onClose={() => setShowSettings(false)} 
