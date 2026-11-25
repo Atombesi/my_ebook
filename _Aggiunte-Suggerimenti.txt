@@ -1,0 +1,157 @@
+# PROGETTO MY_EBOOK – INDEX MANAGER E MODALITÀ LOCALE
+
+## Contesto
+
+Voglio estendere la mia applicazione **MY_Ebook Android**, attualmente funzionante, per permettere anche ad altri utenti di importare e consultare il catalogo dei propri ebook, eventualmente esportato da Calibre.
+
+Repository GitHub:
+https://github.com/Atombesi/my_ebook
+
+L'app è sviluppata con React, TypeScript e Capacitor per Android.
+
+**Vincolo fondamentale: l'app attuale funziona correttamente e non deve essere compromessa. Non modificare alcun file senza una mia autorizzazione esplicita.**
+
+## 1. Obiettivo
+
+Realizzare due componenti:
+
+**A. MY_Ebook Index Manager**
+
+Una piccola applicazione web, pubblicabile su GitHub Pages, utilizzabile dal browser senza installare software sul PC.
+
+Deve permettere di:
+
+- Importare cataloghi CSV esportati da Calibre.
+- Importare CSV generici o file XLSX con struttura predefinita.
+- Visualizzare e correggere i dati bibliografici.
+- Individuare duplicati ed errori.
+- Aggiungere manualmente libri.
+- Generare il file `Ebook_Index.txt` nel formato esatto richiesto da MY_Ebook.
+- Riaprire un indice esistente per modificarlo e rigenerarlo.
+
+La conversione deve avvenire localmente nel browser, senza inviare i dati a un server.
+
+**B. MY_Ebook Android**
+
+Aggiungere una seconda modalità di gestione dell'indice, chiamata **Locale**, mantenendo integralmente quella attuale.
+
+## 2. Modalità di funzionamento
+
+Nelle impostazioni prevedere due modalità selezionabili:
+
+### ONLINE
+
+È la modalità attualmente esistente.
+
+Deve mantenere il funzionamento attuale, inclusi:
+
+- Download dell'indice remoto.
+- Controllo degli aggiornamenti tramite gli indirizzi configurati.
+- Confronto delle date.
+- Memorizzazione locale dell'indice.
+- Consultazione offline.
+
+### LOCALE
+
+È la nuova modalità.
+
+Deve consentire di:
+
+- Premere un pulsante **Importa indice**.
+- Aprire il selettore documenti standard di Android.
+- Selezionare `Ebook_Index.txt` dalla memoria del telefono o da servizi disponibili nel selettore, come Google Drive, Dropbox e Nextcloud.
+- Verificare la validità del file.
+- Visualizzare un riepilogo dell'importazione.
+- Chiedere conferma prima di sostituire l'indice esistente.
+- Salvare il nuovo indice localmente.
+- Aggiornare immediatamente la biblioteca visualizzata.
+- Consultare il catalogo senza connessione Internet.
+
+In modalità Locale non devono essere effettuati controlli online degli aggiornamenti del catalogo.
+
+I controlli relativi alle nuove versioni dell'applicazione devono invece rimanere disponibili, indipendentemente dalla modalità scelta.
+
+## 3. Regole di sicurezza
+
+- Conservare un unico catalogo locale.
+- Non cancellare il catalogo quando si cambia modalità.
+- Non sostituire il catalogo prima di aver verificato il nuovo file e ottenuto conferma.
+- Non modificare né cancellare note personali, valutazioni, prestiti e altre informazioni dell'utente.
+- Non compromettere l'attuale sincronizzazione online.
+- Gestire esplicitamente errori di lettura, file non valido e importazione annullata.
+- Mantenere il comportamento attuale alla prima installazione, compresa la generazione dell'indice iniziale.
+
+## 4. Componenti da analizzare
+
+Nel repository Android sono stati individuati:
+
+- `SettingsModal.tsx` – Impostazioni e selettore file.
+- `csvService.ts` – Lettura e memorizzazione dell'indice.
+- `syncService.ts` – Controllo aggiornamenti e download.
+- `App.tsx` – Gestione dei dati e aggiornamento dell'interfaccia.
+- `types.ts` – Definizione delle impostazioni.
+
+Il progetto utilizza già `@capawesome/capacitor-file-picker` per importare backup JSON.
+
+Verificare se tale componente può essere riutilizzato per importare l'indice TXT, anche da provider cloud Android.
+
+Non presumere che il selettore possa ricordare automaticamente il file scelto: questa funzionalità è opzionale e richiede una verifica separata.
+
+## 5. Compatibilità dell'indice
+
+Verificare nei sorgenti il formato effettivamente richiesto dall'app.
+
+Il formato atteso, sulla base delle analisi precedenti, è un file di testo separato da punto e virgola, con intestazione contenente una data e righe con:
+
+`Autore;Titolo;Formato`
+
+L'Index Manager deve produrre un file compatibile con il parser Android esistente, senza richiedere modifiche inutili al formato.
+
+Verificare inoltre la gestione di duplicati, caratteri speciali e formati multipli.
+
+## 6. Metodo di lavoro obbligatorio
+
+Procedere per piccoli passi verificabili.
+
+**FASE 1 – Analisi**
+
+1. Leggere i sorgenti aggiornati su GitHub.
+2. Verificare il funzionamento attuale dell'indice e degli aggiornamenti.
+3. Verificare la compatibilità del selettore file con i documenti TXT.
+4. Individuare tutte le modifiche necessarie.
+5. Presentare un piano dettagliato con rischi e dipendenze.
+
+**Fermarsi e attendere la mia autorizzazione.**
+
+**FASE 2 – Importazione locale**
+
+Solo dopo autorizzazione, implementare e verificare l'importazione dell'indice.
+
+**FASE 3 – Modalità Online/Locale**
+
+Solo dopo autorizzazione, introdurre la distinzione tra le due modalità e verificare che il controllo degli aggiornamenti rispetti la modalità selezionata.
+
+**FASE 4 – Index Manager**
+
+Progettare e realizzare, dopo autorizzazione, l'applicazione web per importare cataloghi Calibre e generare l'indice.
+
+## 7. Vincoli generali
+
+- Non modificare il codice senza autorizzazione esplicita.
+- Non introdurre dipendenze non necessarie.
+- Non riscrivere componenti che funzionano già.
+- Non cambiare il sistema di backup esistente.
+- Non eliminare la sincronizzazione Dropbox.
+- Non introdurre autenticazioni Google o altri servizi cloud.
+- Verificare sempre la fattibilità prima di proporre modifiche.
+- Distinguere i fatti verificati dalle ipotesi.
+- Dopo ogni modifica autorizzata, verificare la compilazione e il comportamento interessato.
+- Non procedere automaticamente alla fase successiva.
+
+## PRIMA RICHIESTA
+
+Inizia esclusivamente dalla **FASE 1 – Analisi**.
+
+Esamina il repository GitHub aggiornato, individua i punti precisi da modificare, valuta i rischi per il funzionamento attuale e proponi un piano di implementazione.
+
+**Non modificare alcun file e attendi la mia approvazione prima di procedere.**

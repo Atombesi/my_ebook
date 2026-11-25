@@ -91,6 +91,14 @@ const AppContent: React.FC = () => {
   const [selectedAuthors, setSelectedAuthors] = useState<string[]>([]);
   const [isAuthorModalOpen, setIsAuthorModalOpen] = useState(false); // Modal State
   const [isAddBookModalOpen, setIsAddBookModalOpen] = useState(false); // Add Book Modal
+  const [isbnAuthor, setIsbnAuthor] = useState('');
+  const [isbnTitle, setIsbnTitle] = useState('');
+  const [isSimilarBooksModalOpen, setIsSimilarBooksModalOpen] = useState(false);
+  const [similarBooks, setSimilarBooks] = useState<Book[]>([]);
+  const [scannedBook, setScannedBook] = useState<{
+  author: string;
+  title: string;
+} | null>(null);
   const [isLoanHistoryModalOpen, setIsLoanHistoryModalOpen] = useState(false);
   const [isQuickNotesOpen, setIsQuickNotesOpen] = useState(false);
 
@@ -618,6 +626,78 @@ const AppContent: React.FC = () => {
     return Array.from(authors).sort((a: string, b: string) => a.localeCompare(b));
   }, [data.books]);
 
+  const cercaLibriSimili = (author: string, title: string): Book[] => {
+
+  const normalizza = (testo: string) =>
+    testo
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLocaleUpperCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
+
+  const parti = author.split(',');
+  const autore = parti.length === 2
+    ? `${parti[1].trim()} ${parti[0].trim()}`
+    : author.trim();
+
+  const autoreSBN = normalizza(autore);
+  const titoloSBN = normalizza(title);
+
+  const somiglianza = (a: string, b: string): number => {
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+
+    const paroleA = a.split(' ');
+    const paroleB = b.split(' ');
+
+    const comuni = paroleA.filter(p => paroleB.includes(p));
+    const totale = Math.max(paroleA.length, paroleB.length);
+
+    return comuni.length / totale;
+  };
+
+  const chiaviIndice = new Set(data.books.map(b => getBookKey(b)));
+
+  const libriManuali: Book[] = Object.keys(bookNotes)
+    .filter(key => !chiaviIndice.has(key))
+    .map(key => {
+      const separatore = key.indexOf('|');
+      return {
+        id: `manual-${key}`,
+        author: separatore >= 0 ? key.substring(0, separatore) : '',
+        title: separatore >= 0 ? key.substring(separatore + 1) : '',
+        format: 'MANUAL'
+      };
+    });
+
+  const tuttiLibri = [...data.books, ...libriManuali];
+
+
+return tuttiLibri.filter(libro => {
+  const autoreLibro = normalizza(libro.author);
+  const titoloLibro = normalizza(libro.title);
+
+  const simAutore = somiglianza(autoreSBN, autoreLibro);
+  const simTitolo = somiglianza(titoloSBN, titoloLibro);
+
+  // Controlla se un titolo è contenuto nell'altro
+  const titoloContenuto =
+    titoloSBN.includes(titoloLibro) ||
+    titoloLibro.includes(titoloSBN);
+
+
+return (
+  (simAutore >= 0.8 && simTitolo >= 0.6) ||
+  (simTitolo >= 0.8 && simAutore >= 0.6) ||
+  (simAutore >= 0.8 && titoloContenuto) ||
+  (!autoreSBN && titoloContenuto && titoloLibro.length >= 8)
+);
+
+});
+
+};
   // --- FILTER & SORT LOGIC ---
   const filteredBooks = useMemo(() => {
     // 1. Filter CSV Books
@@ -672,6 +752,9 @@ const AppContent: React.FC = () => {
           return titleLower.includes(searchLower) || authorLower.includes(searchLower);
       }
     });
+
+
+
 
     // 2. ORPHAN BOOKS LOGIC (Libri aggiunti manualmente)
     const csvKeys = new Set(data.books.map(b => getBookKey(b)));
@@ -863,18 +946,174 @@ const AppContent: React.FC = () => {
       ></div>
       
       <div className="z-10 flex flex-col h-full w-full">
-        <Header 
-          metadata={data.metadata} 
-          filteredCount={filteredBooks.length} 
-          totalCount={data.books.length}
-          onRefreshData={refreshAppData}
-          onSettingsSaved={handleSettingsSaved}
-          isBusy={isBusy}
-          uiOpacity={uiOpacity}
-          onDataRestored={refreshAppData}
-          onOpenLoanHistory={() => setIsLoanHistoryModalOpen(true)}
-        />
+       <Header
+  metadata={data.metadata}
+  filteredCount={filteredBooks.length}
+  totalCount={data.books.length}
+  onRefreshData={refreshAppData}
+  onSettingsSaved={handleSettingsSaved}
+  isBusy={isBusy}
+  uiOpacity={uiOpacity}
+  onDataRestored={refreshAppData}
+  onOpenLoanHistory={() => setIsLoanHistoryModalOpen(true)}
 
+
+getBookStatus={(author, title) => {
+  const parti = author.split(',');
+  const autoreConvertito = parti.length === 2
+    ? `${parti[1].trim()} ${parti[0].trim()}`
+    : author.trim();
+
+  const normalizza = (nome: string) =>
+    nome.trim().replace(/\s+/g, ' ').toLocaleUpperCase();
+
+  const nomeDaCercare = normalizza(autoreConvertito);
+
+  const autoreIndice = data.books.find(
+    b => normalizza(b.author) === nomeDaCercare
+  );
+
+  let autoreFinale = autoreIndice?.author || autoreConvertito;
+
+  if (!autoreIndice) {
+    const chiaveAutore = Object.keys(bookNotes).find(
+      key => normalizza(key.split('|')[0]) === nomeDaCercare
+    );
+
+    if (chiaveAutore) {
+      autoreFinale = chiaveAutore.split('|')[0];
+    }
+  }
+
+  const chiaveLibro = getRawKey(autoreFinale, title);
+
+  const presenteIndice = data.books.some(
+    b => getBookKey(b) === chiaveLibro
+  );
+
+  const presenteNote = Object.prototype.hasOwnProperty.call(
+    bookNotes,
+    chiaveLibro
+  );
+
+  // Prima controlla la corrispondenza esatta
+  if (presenteIndice || presenteNote) {
+    return bookNotes[chiaveLibro]?.cartaceo
+      ? 'PAPERBACK'
+      : 'PRESENT';
+  }
+
+  // Poi cerca libri con autore e titolo simili
+  const libriSimili = cercaLibriSimili(author, title);
+
+  if (libriSimili.length > 0) {
+    return 'SIMILAR';
+  }
+
+  return 'ABSENT';
+}}
+
+
+onBookScanned={(author, title) => {
+
+  // Converte "Cognome, Nome" in "Nome Cognome"
+  const parti = author.split(',');
+  const autoreConvertito = parti.length === 2
+    ? `${parti[1].trim()} ${parti[0].trim()}`
+    : author.trim();
+
+  const normalizza = (nome: string) =>
+    nome.trim().replace(/\s+/g, ' ').toLocaleUpperCase();
+
+  const nomeDaCercare = normalizza(autoreConvertito);
+
+  // Cerca l'autore nell'indice principale
+  const autoreIndice = data.books.find(
+    b => normalizza(b.author) === nomeDaCercare
+  );
+
+  let autoreFinale = autoreIndice?.author || autoreConvertito;
+
+  // Cerca anche tra gli autori dei libri manuali
+  if (!autoreIndice) {
+    const chiaveAutore = Object.keys(bookNotes).find(
+      key => normalizza(key.split('|')[0]) === nomeDaCercare
+    );
+
+    if (chiaveAutore) {
+      autoreFinale = chiaveAutore.split('|')[0];
+    }
+  }
+
+  // Verifica se il libro è già presente
+  const chiaveLibro = getRawKey(autoreFinale, title);
+
+  const libroIndice = data.books.find(
+    b => getBookKey(b) === chiaveLibro
+  );
+
+  const presenteNelleNote = Object.prototype.hasOwnProperty.call(
+    bookNotes,
+    chiaveLibro
+  );
+
+  if (libroIndice || presenteNelleNote) {
+
+    const datiEsistenti = bookNotes[chiaveLibro] || {};
+
+    // Libro già presente e cartaceo
+    if (datiEsistenti.cartaceo) {
+      alert('Il libro è già presente ed è già cartaceo.');
+      return;
+    }
+
+    // Richiesta di conferma
+    const conferma = window.confirm(
+      'Il libro è già presente nella libreria.\n\n' +
+      'Vuoi contrassegnarlo come CARTACEO?'
+    );
+
+    if (!conferma) return;
+
+    // Conserva tutti i dati esistenti
+    const updatedNotes = {
+      ...bookNotes,
+      [chiaveLibro]: {
+        ...datiEsistenti,
+        cartaceo: true,
+        updatedAt: new Date().toISOString()
+      }
+    };
+
+    setBookNotes(updatedNotes);
+    saveNotes(updatedNotes);
+
+    alert('Libro aggiornato come CARTACEO.');
+    return;
+  }
+
+
+  // Cerca eventuali libri molto simili
+  const libriSimili = cercaLibriSimili(author, title);
+
+  if (libriSimili.length > 0) {
+    setScannedBook({
+      author: autoreFinale,
+      title: title
+    });
+
+    setSimilarBooks(libriSimili);
+    setIsSimilarBooksModalOpen(true);
+    return;
+  }
+
+  // Nessuna corrispondenza: normale inserimento
+  setIsbnAuthor(autoreFinale);
+  setIsbnTitle(title);
+  setIsAddBookModalOpen(true);
+}}
+
+/>
         {/* UNIFIED CONTROL PANEL (Sort, Filters, Search) */}
         <SearchBlock 
           searchTerm={searchTerm} 
@@ -1001,11 +1240,109 @@ const AppContent: React.FC = () => {
       />
 
       {/* Add Manual Book Modal */}
-      <AddBookModal 
+        <AddBookModal
          isOpen={isAddBookModalOpen}
-         onClose={() => setIsAddBookModalOpen(false)}
-         onConfirm={handleManualBookSave}
-      />
+        onClose={() => setIsAddBookModalOpen(false)}
+        onConfirm={handleManualBookSave}
+         initialAuthor={isbnAuthor}
+         initialTitle={isbnTitle}
+         />
+
+
+{/* Confronto libri simili */}
+{isSimilarBooksModalOpen && scannedBook && (
+  <div className="fixed inset-0 z-[300] bg-black/80 flex items-center justify-center p-4">
+    <div className="bg-slate-900 text-white rounded-xl p-5 w-full max-w-lg max-h-[90vh] overflow-y-auto flex flex-col gap-4">
+
+      <h2 className="text-xl font-bold text-amber-400">
+        Possibile libro già presente
+      </h2>
+
+      <div className="bg-slate-800 rounded-lg p-3">
+        <p className="text-slate-400 text-xs mb-2">
+          LIBRO SCANSIONATO
+        </p>
+        <p className="font-bold">{scannedBook.title}</p>
+        <p>{scannedBook.author}</p>
+      </div>
+
+      <p className="text-sm">
+        Seleziona un libro soltanto se ritieni che sia lo stesso.
+      </p>
+
+      {similarBooks.map((book) => (
+        <div
+          key={book.id}
+          className="border border-slate-600 rounded-lg p-3 flex flex-col gap-3"
+        >
+          <div>
+            <p className="font-bold">{book.title}</p>
+            <p className="text-slate-300">{book.author}</p>
+          </div>
+
+          <button
+            type="button"
+            className="bg-emerald-700 rounded-lg py-2 font-semibold"
+            onClick={() => {
+              const key = getBookKey(book);
+              const existing = bookNotes[key] || {};
+
+              if (existing.cartaceo) {
+                alert('Questo libro è già contrassegnato come cartaceo.');
+                setIsSimilarBooksModalOpen(false);
+                return;
+              }
+
+              if (!window.confirm(
+                'Confermi che si tratta dello stesso libro e vuoi contrassegnarlo come CARTACEO?'
+              )) {
+                return;
+              }
+
+              const updatedNotes = {
+                ...bookNotes,
+                [key]: {
+                  ...existing,
+                  cartaceo: true,
+                  updatedAt: new Date().toISOString()
+                }
+              };
+
+              setBookNotes(updatedNotes);
+              saveNotes(updatedNotes);
+              setIsSimilarBooksModalOpen(false);
+              alert('Libro esistente aggiornato come cartaceo.');
+            }}
+          >
+            È lo stesso libro
+          </button>
+        </div>
+      ))}
+
+      <button
+        type="button"
+        className="bg-blue-700 rounded-lg py-3 font-semibold"
+        onClick={() => {
+          setIsbnAuthor(scannedBook.author);
+          setIsbnTitle(scannedBook.title);
+          setIsSimilarBooksModalOpen(false);
+          setIsAddBookModalOpen(true);
+        }}
+      >
+        Inserisci come nuovo
+      </button>
+
+      <button
+        type="button"
+        className="bg-slate-700 rounded-lg py-3"
+        onClick={() => setIsSimilarBooksModalOpen(false)}
+      >
+        Annulla
+      </button>
+
+    </div>
+  </div>
+)}
 
       {/* Loan History Modal */}
       <LoanHistoryModal
@@ -1031,8 +1368,16 @@ const AppContent: React.FC = () => {
              });
          }}
       />
+{/* Add Manual Book Modal */}
+<AddBookModal
+    isOpen={isAddBookModalOpen}
+    onClose={() => setIsAddBookModalOpen(false)}
+    onConfirm={handleManualBookSave}
+    initialAuthor={isbnAuthor}
+    initialTitle={isbnTitle}
+/>
 
-      {/* Edit Manual Book Modal */}
+{/* Edit Manual Book Modal */}
       <EditManualBookModal
          isOpen={editManualModal.isOpen}
          book={editManualModal.book}

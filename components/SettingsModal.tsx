@@ -672,19 +672,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, h
 
           {currentView === 'DOWNLOAD_SETTINGS' && (
               <div className="flex flex-col gap-4">
-                  {/* EBOOK INDEX FILE / ZIP */}
-                  <div className="flex flex-col gap-2">
-                      <button onClick={() => setShowUrlInput(!showUrlInput)} className="flex items-center justify-between w-full p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 text-slate-300 font-medium text-sm">
-                          <div className="flex items-center gap-2"><FolderOpen className="w-4 h-4 text-emerald-400" />Link Ebook_index.txt (o .zip)</div>{showUrlInput ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                      </button>
-                      {showUrlInput && (
-                        <div className="space-y-3 p-2 bg-slate-950/30 rounded border border-slate-800/50">
-                            <div className="flex justify-between px-1 text-[11px] text-slate-400"><span>Stato:</span>{hasConfiguredUrl ? <span className="text-emerald-400 font-bold">Configurato</span> : <span className="text-red-400">Mancante</span>}</div>
-                            <p className="text-[10px] text-slate-500 leading-tight">Link diretto al file <b>Ebook_index.txt</b> (oppure cartella/archivio .zip con l'indice).</p>
-                            <div className="relative"><textarea value={tempUrlInput} onChange={(e) => setTempUrlInput(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-200 h-16 resize-none font-mono" placeholder="https://dropbox.com/.../Ebook_index.txt?dl=1"/>{showLinkSaveButton && (<button onClick={handleSaveUrlOnly} className="absolute bottom-2 right-2 bg-emerald-600 text-white px-2 py-1 rounded text-[10px]">Salva</button>)}</div>
-                        </div>
-                      )}
-                  </div>
+
 
                   {/* EBOOK UPDATE TXT */}
                   <div className="flex flex-col gap-2">

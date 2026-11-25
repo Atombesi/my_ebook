@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { IndexMetadata, AppSettings } from '../types';
-import { DownloadCloud, Settings, Loader2, AlertTriangle, CheckCircle2, ArrowDownToLine, Server, FileArchive, Zap, Smartphone, ExternalLink, Download } from 'lucide-react';
+import { DownloadCloud, Settings, ScanBarcode, Loader2, AlertTriangle, CheckCircle2, ArrowDownToLine, Server, FileArchive, Zap, Smartphone, ExternalLink, Download } from 'lucide-react';
 import { checkVersion, performDownload, applyUpdate, addLog, checkAppVersion, CheckResult } from '../services/syncService';
 import { SettingsModal } from './SettingsModal';
+import { ISBNScanner } from './ISBNScanner';
 import { InfoModal } from './InfoModal';
 import { loadSettings } from '../services/csvService';
 import { APP_VERSION } from '../version';
@@ -17,6 +18,8 @@ interface HeaderProps {
   uiOpacity: number;
   onDataRestored?: () => void; 
   onOpenLoanHistory?: () => void;
+  onBookScanned?: (author: string, title: string) => void;
+getBookStatus?: (author: string, title: string) => 'ABSENT' | 'PRESENT' | 'PAPERBACK' | 'SIMILAR';
 }
 
 interface UpdatesState {
@@ -27,20 +30,25 @@ interface UpdatesState {
     indexSuccessDate?: string;
 }
 
-export const Header: React.FC<HeaderProps> = ({ 
-    metadata, 
-    filteredCount, 
-    totalCount, 
-    onRefreshData, 
-    onSettingsSaved, 
-    isBusy, 
+export const Header: React.FC<HeaderProps> = ({
+    metadata,
+    filteredCount,
+    totalCount,
+    onRefreshData,
+    onSettingsSaved,
+    isBusy,
     uiOpacity,
-    onDataRestored, onOpenLoanHistory 
+    onDataRestored,
+    onOpenLoanHistory,
+    onBookScanned,
+    getBookStatus
 }) => {
+
   const [isChecking, setIsChecking] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [updateError, setUpdateError] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showISBNScanner, setShowISBNScanner] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [isOnboarding, setIsOnboarding] = useState(false); 
   const [updatesModal, setUpdatesModal] = useState<UpdatesState>({ isOpen: false });
@@ -54,11 +62,15 @@ export const Header: React.FC<HeaderProps> = ({
   const [backgroundAppUpdate, setBackgroundAppUpdate] = useState<{versionStr: string; downloadUrl?: string; versionInfo?: string} | null>(null);
 
   useEffect(() => {
-    const settings = loadSettings();
-    if (!settings.folderUrl || settings.folderUrl.trim() === '') {
-        setIsOnboarding(true);
-        setShowSettings(true);
-    }
+const settings = loadSettings();
+
+if (
+    !settings.folderUrl?.trim() &&
+    !settings.lastUpdateUrl?.trim()
+) {
+    setIsOnboarding(true);
+    setShowSettings(true);
+}
 
     // BACKGROUND CHECK on startup
     const timer = setTimeout(async () => {
@@ -234,7 +246,16 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
           
+
           <div className="flex items-center gap-2">
+            <button
+                  onClick={() => setShowISBNScanner(true)}
+                 title="Scansiona ISBN"
+                 aria-label="Scansiona ISBN"
+                 className="p-1.5 rounded-full bg-slate-800/40 text-slate-300 hover:text-emerald-400 transition-all active:scale-95 shadow-sm"
+            >
+                 <ScanBarcode className="w-4 h-4" />
+            </button>
               <button 
                   onClick={() => { setIsOnboarding(false); setShowSettings(true); }}
                   className="p-1.5 rounded-full bg-slate-800/40 text-slate-300 hover:text-white transition-all active:scale-95 shadow-sm"
@@ -300,7 +321,12 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
       </div>
-
+<ISBNScanner
+    isOpen={showISBNScanner}
+    onClose={() => setShowISBNScanner(false)}
+    onBookScanned={onBookScanned}
+    getBookStatus={getBookStatus}
+/>
       <SettingsModal 
         isOpen={showSettings} 
         onClose={() => setShowSettings(false)} 

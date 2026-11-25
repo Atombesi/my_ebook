@@ -6,23 +6,31 @@ interface AddBookModalProps {
     isOpen: boolean;
     onClose: () => void;
     onConfirm: (author: string, title: string, status: BookStatus | null, cartaceo: boolean) => void;
+    initialAuthor?: string;
+    initialTitle?: string;
 }
 
-export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose, onConfirm }) => {
+export const AddBookModal: React.FC<AddBookModalProps> = ({
+    isOpen,
+    onClose,
+    onConfirm,
+    initialAuthor = '',
+    initialTitle = ''
+}) => {
     const [author, setAuthor] = useState('');
     const [title, setTitle] = useState('');
     const [status, setStatus] = useState<BookStatus | null>(null);
     const [cartaceo, setCartaceo] = useState(false);
 
     // Reset fields on open
-    useEffect(() => {
-        if (isOpen) {
-            setAuthor('');
-            setTitle('');
-            setStatus(null);
-            setCartaceo(false);
-        }
-    }, [isOpen]);
+useEffect(() => {
+    if (isOpen) {
+        setAuthor(initialAuthor);
+        setTitle(initialTitle);
+        setStatus(null);
+        setCartaceo(false);
+    }
+}, [isOpen, initialAuthor, initialTitle]);
 
     if (!isOpen) return null;
 

@@ -189,6 +189,7 @@ export interface CheckResult {
 
 export interface ParsedUpdateContent {
     indexDateStr?: string;
+    indexDownloadUrl?: string;
     appVersionStr?: string;
     appDownloadUrl?: string;
     versionInfo?: string;
@@ -200,6 +201,7 @@ let cachedUpdateFileText: string | null = null;
 export const parseUpdateFileContent = (content: string): ParsedUpdateContent => {
     const lines = content.split(/[\r\n]+/).map(l => l.trim()).filter(l => l.length > 0);
     let indexDateStr: string | undefined;
+    let indexDownloadUrl: string | undefined;
     let appVersionStr: string | undefined;
     let appDownloadUrl: string | undefined;
     let versionInfo: string | undefined;
@@ -210,8 +212,14 @@ export const parseUpdateFileContent = (content: string): ParsedUpdateContent => 
             const key = line.substring(0, sepIdx).trim().toUpperCase();
             let val = line.substring(sepIdx + 1).replace(/^[;:\s]+/, '').trim();
 
-            if (key.includes('INDEX')) {
-                indexDateStr = val;
+if (key === 'INDEXURL' || key === 'INDEX_URL') {
+    const cleanUrl = val.replace(/[;:\s]+$/, '').trim();
+
+    if (cleanUrl.toLowerCase().startsWith('https://')) {
+        indexDownloadUrl = cleanUrl;
+    }
+} else if (key.includes('INDEX')) {
+    indexDateStr = val;
             } else if (key.includes('APPURL') || key.includes('APP_URL') || key.includes('APK') || key.includes('URL_APP')) {
                 // Gestisce casi come "AppUrl;;" o stringhe senza link: viene considerato non specificato
                 const cleanUrl = val.replace(/[;:\s]+$/, '').trim();
@@ -259,7 +267,13 @@ export const parseUpdateFileContent = (content: string): ParsedUpdateContent => 
 
     addLog(`[DEBUG] Update parse -> Data: ${indexDateStr || 'NON TROVATA'}, Versione: ${appVersionStr || 'NON TROVATA'}, AppUrl: ${appDownloadUrl || 'NON SPECIFICATO'}, Info: ${versionInfo || 'NESSUNA'}`);
 
-    return { indexDateStr, appVersionStr, appDownloadUrl, versionInfo };
+return {
+    indexDateStr,
+    indexDownloadUrl,
+    appVersionStr,
+    appDownloadUrl,
+    versionInfo
+};
 };
 
 export const checkAppVersion = async (
@@ -528,12 +542,36 @@ export const performDownload = async (
     const settings = loadSettings();
     let blob = cachedBlob;
 
-    if (!blob) {
-        if (onStatusUpdate) onStatusUpdate("Download indice...");
-        const response = await fetchViaProxy(settings.folderUrl, settings.customProxyUrl, onStatusUpdate);
-        if (!response.ok) throw new Error("Download fallito");
-        blob = await response.blob();
+
+if (!blob) {
+    let indexUrl = settings.folderUrl;
+
+    // Recupera il link dell'indice da Ebook_update.txt
+    if (cachedUpdateFileText) {
+        const parsed = parseUpdateFileContent(cachedUpdateFileText);
+
+        if (parsed.indexDownloadUrl) {
+            indexUrl = parsed.indexDownloadUrl;
+        }
     }
+
+    if (!indexUrl || indexUrl.trim() === '') {
+        throw new Error("Link dell'indice non disponibile");
+    }
+
+    if (onStatusUpdate) onStatusUpdate("Download indice...");
+
+    const response = await fetchViaProxy(
+        indexUrl,
+        settings.customProxyUrl,
+        onStatusUpdate
+    );
+
+    if (!response.ok) throw new Error("Download fallito");
+
+    blob = await response.blob();
+}
+
 
     if (onStatusUpdate) onStatusUpdate("Elaborazione indice...");
     

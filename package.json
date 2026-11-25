@@ -9,12 +9,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor-mlkit/barcode-scanning": "^8.2.2",
+    "@capacitor/android": "8.1.0",
     "@capacitor/cli": "^8.0.0",
     "@capacitor/core": "^8.0.0",
     "@capacitor/filesystem": "^8.0.0",
     "@capacitor/share": "^8.0.0",
     "@capawesome/capacitor-file-picker": "^8.0.0",
     "@vitejs/plugin-react": "^5.1.2",
+    "@zxing/browser": "^0.1.5",
+    "@zxing/library": "^0.23.0",
     "jszip": "^3.10.1",
     "lucide-react": "^0.562.0",
     "qrcode.react": "^4.2.0",
